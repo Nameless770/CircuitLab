@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { AppConfig, createApp } from "@circuitlab/api";
+import { AppConfig, createApp, type Clock } from "@circuitlab/api";
 import { migrate, startLocalPostgres, type LocalPostgres } from "@circuitlab/database/local";
 import { afterAll, beforeAll, expect } from "vitest";
 import { Api, type Person } from "./client";
@@ -20,7 +20,7 @@ export interface TestContext {
  * with `prisma migrate deploy`, as in production). Returns a getter, since the server only exists
  * once beforeAll has run.
  */
-export function useServer(storage: Storage): () => TestContext {
+export function useServer(storage: Storage, options: { readonly clock?: Clock } = {}): () => TestContext {
   let context: TestContext | undefined;
   let close: (() => Promise<void>) | undefined;
 
@@ -36,7 +36,7 @@ export function useServer(storage: Storage): () => TestContext {
       // One connection: the local PostgreSQL can't interleave several (see local-postgres.ts).
       ...(database !== undefined && { databaseUrl: database.url, databasePoolSize: 1 }),
     });
-    const app = await createApp({ config, logLevels: ["error"] });
+    const app = await createApp({ config, logLevels: ["error"], ...(options.clock !== undefined && { clock: options.clock }) });
     await app.listen(0, "127.0.0.1");
     const { port } = app.getHttpServer().address() as AddressInfo;
     context = { api: new Api(`http://127.0.0.1:${port}`), storage };

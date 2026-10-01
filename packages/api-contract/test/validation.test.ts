@@ -119,7 +119,7 @@ describe("other bodies", () => {
   });
 
   it("simulate requests leave input values to the engine, so every input problem is reported together", () => {
-    expect(parseSimulateRequest({ inputs: { A: "1", Q: 1 } })).toEqual({ inputs: { A: "1", Q: 1 } });
+    expect(parseSimulateRequest({ inputs: { A: "1", Q: 1 } })).toEqual({ inputs: { A: "1", Q: 1 }, mode: "combinational" });
     expect(issuesAt(problemOf(() => parseSimulateRequest({ input: {} }))).sort()).toEqual(["REQUIRED@/inputs", "UNKNOWN_FIELD@/input"]);
     const problem = toProblem(thrown(() => simulate(HALF, { A: "1", Q: 1 } as never)));
     expect(issuesAt(problem)).toEqual(["INVALID_INPUT_VALUE@/inputs/A", "MISSING_INPUT@/inputs/B", "UNKNOWN_INPUT@/inputs/Q"]);

@@ -1,6 +1,7 @@
 import type { ShareRecord, ShareRole } from "@circuitlab/api-contract";
 import { Injectable } from "@nestjs/common";
 import { SharesRepository } from "../circuits/shares.repository";
+import { Clock } from "../common/clock";
 import { InMemoryUsersRepository } from "./in-memory-users.repository";
 
 interface Share {
@@ -13,7 +14,10 @@ interface Share {
 export class InMemorySharesRepository extends SharesRepository {
   private readonly byCircuit = new Map<string, Map<string, Share>>();
 
-  constructor(private readonly users: InMemoryUsersRepository) {
+  constructor(
+    private readonly users: InMemoryUsersRepository,
+    private readonly clock: Clock,
+  ) {
     super();
   }
 
@@ -32,7 +36,7 @@ export class InMemorySharesRepository extends SharesRepository {
     const shares = this.byCircuit.get(circuitId) ?? new Map<string, Share>();
     this.byCircuit.set(circuitId, shares);
     const existing = shares.get(userId);
-    const share: Share = { role, createdAt: existing?.createdAt ?? new Date() };
+    const share: Share = { role, createdAt: existing?.createdAt ?? this.clock.now() };
     shares.set(userId, share);
     return { share: { user, role, createdAt: share.createdAt }, created: existing === undefined };
   }

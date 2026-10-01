@@ -1,10 +1,10 @@
-# CircuitLab testing (phase 8)
+# CircuitLab testing (phase 8, extended in phase 9)
 
 ```bash
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 579 of them in about 15 seconds. The
+That builds everything, type-checks the tests, and runs all 633 of them in about 15 seconds. The
 API's integration tests run twice: once with storage in memory, once on a real PostgreSQL 18.
 
 | Command | What it does |
@@ -39,11 +39,11 @@ version (412) instead of overwriting someone's change"), so a failure says which
 
 | Project | Tests | What |
 | --- | --- | --- |
-| engine | 122 | Every gate type for every input combination (2 to 5 inputs, and 64-input gates on chosen vectors); known circuits against independent references; validation issues and their locations; sorting and cycles; simulation inputs; truth tables up to 2^53 rows; errors crossing JSON |
+| engine | 148 | Every gate type for every input combination (2 to 5 inputs, and 64-input gates on chosen vectors); known circuits against independent references; validation issues and their locations; sorting and cycles; simulation inputs; truth tables up to 2^53 rows; errors crossing JSON. Phase 9: the gate registry and factory; both simulation strategies (latches, flip-flops, a divide-by-two counter, oscillators, state checks); Tarjan's components against brute-force reachability |
 | netlist | 20 | Reading, writing, and round trips; streamed input split at every possible byte (inside multi-byte characters too); every mistake in `broken.net` at its line; line-length and gate limits; gzip; cancellation |
-| runner | 8 | Worker threads give the engine's exact answers and errors; overload (503 material), cancellation, time-outs, closing; a task that runs out of memory crashes only its own worker |
-| api-contract | 85 | `openapi.yaml` and the code agree on every limit and code; request validation; RFC 9457 problems; cursor paging (no skips or repeats while circuits are added); ETags; content negotiation |
-| api | 344 | The whole API over HTTP, against memory (154) and PostgreSQL (154); the app's smaller parts directly (33); startup and run-time database failures (3) |
+| runner | 9 | Worker threads give the engine's exact answers and errors; overload (503 material), cancellation, time-outs, closing; a task that runs out of memory crashes only its own worker; sequential steps with state crossing the thread |
+| api-contract | 90 | `openapi.yaml` and the code agree on every limit, code, and mode; request validation; RFC 9457 problems; cursor paging (no skips or repeats while circuits are added); ETags; content negotiation |
+| api | 366 | The whole API over HTTP, against memory (160) and PostgreSQL (160); the time rules with an injected clock, on both (10); the app's smaller parts directly (33); startup and run-time database failures (3) |
 
 **Known circuits, checked against independent references.** The half adder against its truth table;
 the full adder against `S + 2·Cout = A + B + Cin`; a 6-bit ripple-carry adder for all 8,192
@@ -95,6 +95,16 @@ planted by hand in the built code, one at a time. Every one made a test fail:
 | A sixth password guess allowed | the throttle test |
 | A cursor's own row repeated on the next page | `pages through ... with no skips or repeats` |
 
+Phase 9 planted five more, in the code it added, and all were caught as well:
+
+| Planted bug | Caught by |
+| --- | --- |
+| A loop's gates are never re-evaluated | the D latch and SR latch tests |
+| Tarjan's components come out in the wrong order | the component and strategy-equivalence tests |
+| The state passed in is ignored | `remembers: an SR latch is set, holds, is reset, and holds again` |
+| The registry's NOR computes OR | the NOR gate tests |
+| The token service ignores the injected clock | the access token expiring after 15 minutes |
+
 This is mutation testing by hand; a tool such as Stryker automates it.
 
 **Coverage:** 94% of statements, 85% of branches, 97% of functions. It is measured on the built
@@ -118,6 +128,18 @@ results instead.
   memory accepted it. The check moved into the contract, where both use it.
 - **db:check didn't run every query it claimed to.** It now fails unless all 29 named queries
   run (found while extending it for phase 7).
+
+## Time, without waiting (phase 9)
+
+The rules that depend on time are tested by moving a clock instead of waiting
+([time.test.ts](../apps/api/test/time.test.ts)). The app receives its `Clock` through dependency
+injection, so the tests hand it one they control and move it forward. They check that:
+- **access tokens** expire after 15 minutes;
+- **sessions** end after 30 days without a refresh, and live on when refreshed in time;
+- **blocked sign-ins** unblock after 15 minutes;
+- **circuits, edits, and runs** are stamped with that time.
+
+They run on both storages; see [design-patterns.md](design-patterns.md).
 
 ## Not covered
 

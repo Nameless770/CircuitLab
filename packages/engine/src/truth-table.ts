@@ -1,6 +1,5 @@
-import { CompiledCircuit, compileCircuit } from "./compile";
+import { CompiledCircuit, compileCircuit, runPlan } from "./compile";
 import { showValue } from "./internal/util";
-import { runPlan } from "./simulate";
 import type { Bit, Circuit } from "./types";
 
 /**

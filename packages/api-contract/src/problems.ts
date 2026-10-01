@@ -4,6 +4,7 @@
 import {
   CircuitValidationError,
   CycleError,
+  OscillationError,
   SimulationInputError,
   type InputIssue,
   type ValidationIssue,
@@ -34,6 +35,7 @@ export const PROBLEM_TYPES = {
   "feedback-loop": { status: 422, title: "Circuit has a feedback loop" },
   "too-many-inputs": { status: 422, title: "Too many inputs for a truth table" },
   "computation-too-large": { status: 422, title: "Computation too large" },
+  "does-not-settle": { status: 422, title: "Circuit does not settle" },
   "invalid-fields": { status: 422, title: "Invalid fields" },
   "too-many-requests": { status: 429, title: "Too many requests" },
   // Never sent (the client has gone), but gives logs a status: nginx's convention.
@@ -141,6 +143,12 @@ export function toProblem(error: unknown, instance?: string): ProblemResponse {
     });
   }
 
+  if (error instanceof OscillationError) {
+    return respond("does-not-settle", `The loop of gates ${error.gates.join(", ")} keeps changing instead of settling, so it has no stable state.`, {
+      issues: error.gates.map((gateId) => ({ code: "DOES_NOT_SETTLE", message: "keeps changing", gateId })),
+    });
+  }
+
   // The simulation workers: overload is temporary (503 + Retry-After); running out of memory is not.
   if (error instanceof PoolBusyError) {
     return respond("server-busy", "Every simulation worker is busy. Try again shortly.", {
@@ -196,7 +204,10 @@ export function circuitIssue(issue: ValidationIssue): ProblemIssue {
   };
 }
 
-function inputIssue({ code, message, inputId }: InputIssue): ProblemIssue {
+/** An input or state problem, located in the simulate request's body. */
+function inputIssue({ code, message, inputId, stateGateId }: InputIssue): ProblemIssue {
+  if (stateGateId !== undefined) return { code, message, pointer: `/state/${escapePointer(stateGateId)}`, gateId: stateGateId };
+  if (code === "MALFORMED_STATE") return { code, message, pointer: "/state" };
   return { code, message, pointer: inputId === undefined ? "/inputs" : `/inputs/${escapePointer(inputId)}` };
 }
 

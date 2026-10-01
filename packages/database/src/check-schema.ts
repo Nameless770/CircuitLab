@@ -24,7 +24,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
-import { CycleError, topologicalSort, truthTable, type Circuit, type Gate, type Wire } from "@circuitlab/engine";
+import { CycleError, GATE_TYPES, SIMULATION_MODES, topologicalSort, truthTable, type Circuit, type Gate, type Wire } from "@circuitlab/engine";
 import { importNetlistFile } from "@circuitlab/netlist";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
@@ -236,6 +236,14 @@ async function applyMigrations(): Promise<void> {
     `${await count("SELECT count(*) AS n FROM pg_type WHERE typtype = 'e' AND typnamespace = 'public'::regnamespace")} enum types`);
   print(`queries.sql: ${QUERIES.size} named queries`);
 
+  // The database's enums must list exactly what the engine's registries do: a gate type added to
+  // the gate registry, or a mode added to the strategies, needs a migration too.
+  const labels = async (type: string): Promise<string[]> =>
+    (await db.query<{ label: string }>(`SELECT unnest(enum_range(NULL::${type}))::text AS label`)).rows.map((row) => row.label);
+  assert.deepEqual(await labels("gate_type"), [...GATE_TYPES], "gate_type differs from the engine's gate registry");
+  assert.deepEqual(await labels("simulation_mode"), [...SIMULATION_MODES], "simulation_mode differs from the engine's strategies");
+  print(`gate_type and simulation_mode match the engine's gate registry and simulation strategies`);
+
   // The ownerless circuit is still there, private. Making the owner rule hold for every row
   // (VALIDATE CONSTRAINT) has to wait until it has an owner or is gone.
   const old = (await db.query<{ owner_id: string | null; visibility: string }>("SELECT owner_id, visibility FROM circuits WHERE id = $1", [legacy])).rows[0];
@@ -358,6 +366,7 @@ async function constraints(): Promise<void> {
     ["A succeeded simulate run without outputs", runRow, ["simulate", "succeeded", { A: 1 }, null, null, null, before, now], "simulation_runs_status_fields"],
     ["A queued run that has already started", runRow, ["truth_table", "queued", null, null, 0, 10, before, null], "simulation_runs_status_fields"],
     ["A run that finished before it started", runRow, ["truth_table", "failed", null, null, 0, 10, now, before], "simulation_runs_finished_after_started"],
+    ["A sequential truth table", `INSERT INTO simulation_runs (circuit_id, circuit_version, kind, mode, status, row_offset, row_limit) VALUES ('${c1}', 1, 'truth_table', 'sequential', 'queued', 0, 10)`, [], "simulation_runs_truth_tables_combinational"],
   ];
 
   let refused = 0;
@@ -380,7 +389,7 @@ async function constraints(): Promise<void> {
   assert.equal(refused, cases.length);
 
   // Deleting cascades along the foreign keys.
-  await run("record_simulation", [c1, 1, ada, { A: 1, B: 1 }, { Y: 1 }, null]);
+  await run("record_simulation", [c1, 1, ada, { A: 1, B: 1 }, { Y: 1 }, null, "combinational"]);
   const counts = async (): Promise<string> => {
     const row = (await db.query<Record<string, number>>(`SELECT
         (SELECT count(*) FROM circuits) AS circuits, (SELECT count(*) FROM gates) AS gates,
@@ -530,9 +539,9 @@ async function accountsAndSharing(): Promise<void> {
   await showAccess("Bob's share removed:");
 
   // Simulation history: the owner sees every run; anyone else, only their own.
-  await run("record_simulation", [id, 2, ada, { A: 0 }, { Y: 1 }, null]);
-  await run("record_simulation", [id, 2, bob, { A: 1 }, { Y: 0 }, null]);
-  await run("record_simulation", [id, 2, null, { A: 2 }, null, "invalid-inputs"]);
+  await run("record_simulation", [id, 2, ada, { A: 0 }, { Y: 1 }, null, "combinational"]);
+  await run("record_simulation", [id, 2, bob, { A: 1 }, { Y: 0 }, null, "sequential"]);
+  await run("record_simulation", [id, 2, null, { A: 2 }, null, "invalid-inputs", "combinational"]);
   const everyone = (await run("recent_runs", [id, 20])).rows.length;
   const bobs = (await run("recent_runs_by_user", [id, 20, bob])).rows.length;
   assert.deepEqual([everyone, bobs], [3, 1]);

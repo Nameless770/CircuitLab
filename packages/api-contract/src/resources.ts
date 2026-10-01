@@ -1,4 +1,4 @@
-import { CycleError, topologicalSort, type Bit, type Circuit, type SimulationResult } from "@circuitlab/engine";
+import { CycleError, topologicalSort, type Bit, type Circuit, type ModeResult, type SimulationMode } from "@circuitlab/engine";
 import type {
   AuthSession,
   CircuitListItem,
@@ -72,16 +72,15 @@ export function validationReport(circuit: Circuit): ValidationReport {
   return { valid: true, summary: summarizeCircuit(circuit) };
 }
 
-export function simulationResponse(
-  record: Pick<CircuitRecord, "id" | "version">,
-  result: SimulationResult,
-  includeSignals: boolean,
-): SimulationResponse {
+export function simulationResponse(record: Pick<CircuitRecord, "id" | "version">, result: ModeResult, includeSignals: boolean): SimulationResponse {
   return {
     circuitId: record.id,
     circuitVersion: record.version,
+    mode: result.mode,
     outputs: result.outputs,
-    ...(includeSignals && { signals: result.signals, order: result.order }),
+    ...(result.mode === "sequential" && { state: result.state }),
+    ...(includeSignals && { signals: result.signals }),
+    ...(includeSignals && result.mode === "combinational" && { order: result.order }),
   };
 }
 
@@ -90,6 +89,7 @@ export interface RunRecord {
   readonly id: string;
   readonly circuitVersion: number;
   readonly kind: "simulate" | "truth_table";
+  readonly mode: SimulationMode;
   readonly status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   /** As sent, so possibly invalid when the run failed. */
   readonly inputs: Readonly<Record<string, unknown>> | null;
@@ -105,6 +105,7 @@ export function runResource(run: RunRecord): SimulationRunResource {
     id: run.id,
     circuitVersion: run.circuitVersion,
     kind: run.kind,
+    mode: run.mode,
     status: run.status,
     ...(run.inputs !== null && { inputs: run.inputs }),
     ...(run.outputs !== null && { outputs: run.outputs }),

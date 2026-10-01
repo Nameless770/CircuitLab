@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { UserRecord, UserSummary } from "@circuitlab/api-contract";
 import { Injectable } from "@nestjs/common";
 import { UsersRepository, type NewUser, type UserWithPassword } from "../auth/users.repository";
+import { Clock } from "../common/clock";
 
 /** Accounts in a Map, for when there is no database. One account per email address, as in PostgreSQL. */
 @Injectable()
@@ -9,9 +10,13 @@ export class InMemoryUsersRepository extends UsersRepository {
   private readonly byId = new Map<string, UserWithPassword>();
   private readonly idByEmail = new Map<string, string>();
 
+  constructor(private readonly clock: Clock) {
+    super();
+  }
+
   async create(user: NewUser): Promise<UserRecord | undefined> {
     if (this.idByEmail.has(user.email)) return undefined;
-    const stored: UserWithPassword = Object.freeze({ id: randomUUID(), ...user, createdAt: new Date() });
+    const stored: UserWithPassword = Object.freeze({ id: randomUUID(), ...user, createdAt: this.clock.now() });
     this.byId.set(stored.id, stored);
     this.idByEmail.set(stored.email, stored.id);
     return withoutPassword(stored);

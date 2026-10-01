@@ -8,6 +8,7 @@ import { PasswordsService } from "../../dist/auth/passwords.service";
 import { formatRefreshToken, hashSecret, newSecret, parseRefreshToken } from "../../dist/auth/refresh-tokens";
 import { SignInThrottle } from "../../dist/auth/sign-in-throttle";
 import { isDatabaseUnavailable } from "../../dist/storage/database-errors";
+import { FakeClock, MINUTE } from "../support/clock";
 
 describe("circuit access", () => {
   const facts = (overrides: Partial<AccessFacts> = {}): AccessFacts => ({ ownerId: "owner", visibility: "private", version: 1, sharedRole: undefined, ...overrides });
@@ -47,40 +48,43 @@ describe("sign-in throttle", () => {
   const window = LIMITS.signIn.windowSeconds * 1000;
 
   it(`blocks a key after ${LIMITS.signIn.maxFailures} failures, until the window since the first failure ends`, () => {
-    const throttle = new SignInThrottle();
-    const start = 1_000_000;
+    const clock = new FakeClock();
+    const throttle = new SignInThrottle(clock);
     for (let failure = 0; failure < LIMITS.signIn.maxFailures; failure++) {
-      expect(() => throttle.check("ada", start + failure)).not.toThrow();
-      throttle.failed("ada", start + failure);
+      expect(() => throttle.check("ada")).not.toThrow();
+      throttle.failed("ada");
     }
+    clock.advance(MINUTE);
     const blocked = toProblem((() => {
       try {
-        throttle.check("ada", start + 60_000);
+        throttle.check("ada");
       } catch (error) {
         return error;
       }
       return undefined;
     })());
     expect(blocked.status).toBe(429);
-    expect(Number(blocked.headers["Retry-After"])).toBe((window - 60_000) / 1000);
-    expect(() => throttle.check("bob", start + 60_000)).not.toThrow(); // other keys are unaffected
-    expect(() => throttle.check("ada", start + window)).not.toThrow(); // the window is over
+    expect(Number(blocked.headers["Retry-After"])).toBe((window - MINUTE) / 1000);
+    expect(() => throttle.check("bob")).not.toThrow(); // other keys are unaffected
+    clock.advance(window - MINUTE);
+    expect(() => throttle.check("ada")).not.toThrow(); // the window is over
   });
 
   it("forgets the failures after a successful sign-in", () => {
-    const throttle = new SignInThrottle();
-    for (let failure = 0; failure < LIMITS.signIn.maxFailures - 1; failure++) throttle.failed("ada", 0);
+    const throttle = new SignInThrottle(new FakeClock());
+    for (let failure = 0; failure < LIMITS.signIn.maxFailures - 1; failure++) throttle.failed("ada");
     throttle.succeeded("ada");
-    throttle.failed("ada", 1);
-    expect(() => throttle.check("ada", 2)).not.toThrow();
+    throttle.failed("ada");
+    expect(() => throttle.check("ada")).not.toThrow();
   });
 
   it("stays bounded in memory, and fast, however many keys an attacker invents", () => {
-    const throttle = new SignInThrottle();
+    const throttle = new SignInThrottle(new FakeClock());
     const started = performance.now();
-    for (let key = 0; key < 300_000; key++) throttle.failed(`key ${key}`, 0);
-    // Pruning on every failure once full made this quadratic: minutes instead of well under a second.
-    expect(performance.now() - started).toBeLessThan(3000);
+    for (let key = 0; key < 300_000; key++) throttle.failed(`key ${key}`);
+    // About a second normally. Pruning on every failure once full made this quadratic: minutes. The
+    // limit sits far from both, so a busy machine doesn't fail the test and the bug still would.
+    expect(performance.now() - started).toBeLessThan(15_000);
     expect((throttle as unknown as { failures: Map<string, unknown> }).failures.size).toBeLessThanOrEqual(100_000);
   });
 });

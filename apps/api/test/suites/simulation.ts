@@ -8,7 +8,7 @@ export function simulationSuite(context: () => TestContext): void {
       const ada = await register(api, "Ada");
       const id = await createCircuit(api, ada);
       const plain = await api.post(`/v1/circuits/${id}/simulate`, { as: ada, json: { inputs: { A: 1, B: 1 } } });
-      expect(plain.body).toEqual({ circuitId: id, circuitVersion: 1, outputs: { S: 0, C: 1 } });
+      expect(plain.body).toEqual({ circuitId: id, circuitVersion: 1, mode: "combinational", outputs: { S: 0, C: 1 } });
       const detailed = await api.post(`/v1/circuits/${id}/simulate?include=signals`, { as: ada, json: { inputs: { A: 1, B: 0 } } });
       expect(detailed.body).toMatchObject({ signals: { A: 1, B: 0, sum: 1, carry: 0, S: 1, C: 0 }, order: ["A", "B", "sum", "carry", "S", "C"] });
     });

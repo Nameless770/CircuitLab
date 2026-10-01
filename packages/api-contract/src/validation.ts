@@ -96,9 +96,11 @@ export function parseMetadataPatch(body: unknown): CircuitMetadataPatch {
  */
 export function parseSimulateRequest(body: unknown): SimulateRequest {
   requireObject(body, 'a JSON object such as {"inputs": {"A": 1}}');
-  const issues = schemaIssues("SimulateRequest", body).filter((issue) => !issue.pointer?.startsWith("/inputs/"));
+  // Values in `inputs` and `state` are the engine's to check, together with which keys the circuit has.
+  const issues = schemaIssues("SimulateRequest", body).filter((issue) => !/^\/(inputs|state)\//.test(issue.pointer ?? ""));
   if (issues.length > 0) throw new ApiError("invalid-inputs", `The request has ${plural(issues.length, "problem")}.`, { issues });
-  return body as unknown as SimulateRequest;
+  const request = body as unknown as { inputs: SimulateRequest["inputs"]; mode?: SimulateRequest["mode"]; state?: SimulateRequest["state"] };
+  return { inputs: request.inputs, mode: request.mode ?? "combinational", ...(request.state !== undefined && { state: request.state }) };
 }
 
 /** @throws ApiError `malformed-body` (400) or `invalid-fields` (422), e.g. a password under 15 characters */

@@ -1,7 +1,7 @@
-import { CycleError, SimulationInputError, simulate, truthTable, type Bit } from "@circuitlab/engine";
+import { CycleError, OscillationError, SimulationInputError, combinational, truthTable, type Bit } from "@circuitlab/engine";
 import { PoolBusyError, PoolClosedError, SimulationPool, WorkerCrashedError } from "@circuitlab/runner";
 import { afterEach, describe, expect, it } from "vitest";
-import { circuit, fullAdder, random, randomCircuit, rippleCarryAdder, srLatch, type GateSpec } from "../../engine/test/fixtures";
+import { circuit, fullAdder, inverterRing, random, randomCircuit, rippleCarryAdder, srLatch, type GateSpec } from "../../engine/test/fixtures";
 
 /** A circuit whose full truth table (2^n rows) keeps a worker busy for a while. */
 function busyWork(n = 22) {
@@ -9,6 +9,13 @@ function busyWork(n = 22) {
   specs.push(["x", "XOR", ...specs.map(([id]) => id)], ["P", "OUTPUT", "x"]);
   return circuit("busy", ...specs);
 }
+
+/**
+ * A million rows: about 1.5 s of work for one worker, and it fits in memory, so it ends the same
+ * way however slow the machine. (The whole table would run the worker out of memory after a few
+ * seconds: a different ending.) The tests cancel it within milliseconds.
+ */
+const BUSY = { limit: 2 ** 20 };
 
 const pools: SimulationPool[] = [];
 function pool(options: ConstructorParameters<typeof SimulationPool>[0]): SimulationPool {
@@ -28,7 +35,7 @@ describe("SimulationPool: same answers as the engine, computed on worker threads
     for (let n = 0; n < 20; n++) {
       const source = randomCircuit(next, 3, 25);
       const inputs: Record<string, Bit> = { in0: next() < 0.5 ? 0 : 1, in1: next() < 0.5 ? 0 : 1, in2: next() < 0.5 ? 0 : 1 };
-      expect(await workers.simulate(source, inputs)).toEqual(simulate(source, inputs));
+      expect(await workers.simulate(source, inputs)).toEqual(combinational.prepare(source).run(inputs));
     }
   });
 
@@ -51,13 +58,22 @@ describe("SimulationPool: same answers as the engine, computed on worker threads
     await expect(workers.simulate(fullAdder(), { A: 1 })).rejects.toBeInstanceOf(SimulationInputError);
     expect(await workers.simulate(fullAdder(), { A: 1, B: 1, Cin: 1 })).toMatchObject({ outputs: { S: 1, Cout: 1 } }); // still working
   });
+
+  it("runs sequential simulations, state passed in and out across the thread", async () => {
+    const workers = pool({ size: 1 });
+    const set = await workers.simulate(srLatch(), { S: 1, R: 0 }, { mode: "sequential" });
+    expect(set).toMatchObject({ mode: "sequential", outputs: { Q: 1 }, state: { q: 1, qbar: 0 } });
+    const held = await workers.simulate(srLatch(), { S: 0, R: 0 }, { mode: "sequential", state: set.state });
+    expect(held.outputs).toEqual({ Q: 1 });
+    await expect(workers.simulate(inverterRing(3), {}, { mode: "sequential" })).rejects.toBeInstanceOf(OscillationError);
+  });
 });
 
 describe("SimulationPool under pressure", () => {
   it("fails fast with PoolBusyError when every worker is busy and the queue is full", async () => {
     const workers = pool({ size: 1, maxQueue: 0 });
     const controller = new AbortController();
-    const running = workers.truthTable(busyWork(), {}, { signal: controller.signal });
+    const running = workers.truthTable(busyWork(), BUSY, { signal: controller.signal });
     await expect(workers.simulate(fullAdder(), { A: 0, B: 0, Cin: 0 })).rejects.toBeInstanceOf(PoolBusyError);
     controller.abort();
     await expect(running).rejects.toMatchObject({ name: "AbortError" });
@@ -66,7 +82,7 @@ describe("SimulationPool under pressure", () => {
   it("stops a running task when its signal fires, and the pool carries on", async () => {
     const workers = pool({ size: 1 });
     const started = Date.now();
-    await expect(workers.truthTable(busyWork(), {}, { signal: AbortSignal.timeout(100) })).rejects.toMatchObject({ name: "TimeoutError" });
+    await expect(workers.truthTable(busyWork(), BUSY, { signal: AbortSignal.timeout(100) })).rejects.toMatchObject({ name: "TimeoutError" });
     expect(Date.now() - started).toBeLessThan(2000); // the worker was stopped, not waited for
     expect(workers.stats.busy).toBe(0);
     expect(await workers.simulate(fullAdder(), { A: 1, B: 0, Cin: 0 })).toMatchObject({ outputs: { S: 1, Cout: 0 } });
@@ -75,7 +91,7 @@ describe("SimulationPool under pressure", () => {
   it("drops a waiting task whose signal fires before it gets a worker", async () => {
     const workers = pool({ size: 1, maxQueue: 5 });
     const blocker = new AbortController();
-    const running = workers.truthTable(busyWork(), {}, { signal: blocker.signal });
+    const running = workers.truthTable(busyWork(), BUSY, { signal: blocker.signal });
     const waiting = new AbortController();
     const queued = workers.simulate(fullAdder(), { A: 0, B: 0, Cin: 0 }, { signal: waiting.signal });
     expect(workers.stats.queued).toBe(1);

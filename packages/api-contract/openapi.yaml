@@ -253,7 +253,16 @@ paths:
       summary: Simulate a circuit once
       description: |
         Evaluates the circuit for one set of input values. Returns the OUTPUT values; add
-        `include=signals` to also get every gate's signal and the evaluation order.
+        `include=signals` to also get every gate's signal.
+
+        Two modes:
+        - `combinational` (the default): every gate once, in dependency order (`include=signals`
+          also returns that order). A circuit with a feedback loop is refused (422 `feedback-loop`).
+        - `sequential`: for circuits with feedback loops, such as latches and flip-flops. Each
+          request is one step. Send back the `state` of the previous answer, and the loops start
+          from what they remembered; without it, every gate starts at 0. A loop that never settles
+          (an odd ring of inverters) answers 422 `does-not-settle`. For a circuit without loops,
+          both modes give the same answer.
       parameters:
         - name: include
           in: query
@@ -803,7 +812,8 @@ components:
     InvalidContent:
       description: |
         The request was read, but what it describes is invalid: `invalid-circuit`, `invalid-netlist`,
-        `invalid-inputs`, `feedback-loop`, `too-many-inputs`, or `computation-too-large`.
+        `invalid-inputs`, `feedback-loop`, `does-not-settle`, `too-many-inputs`, or
+        `computation-too-large`.
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1082,34 +1092,58 @@ components:
           description: One value per INPUT gate, keyed by gate id (see `summary.inputs`).
           type: object
           additionalProperties: { $ref: "#/components/schemas/Bit" }
+        mode: { $ref: "#/components/schemas/SimulationMode" }
+        state: { $ref: "#/components/schemas/SimulationState" }
       examples:
         - inputs: { A: 1, B: 0 }
+        - { inputs: { S: 0, R: 0 }, mode: sequential, state: { q: 1, qbar: 0 } }
+
+    SimulationMode:
+      description: |
+        `combinational` (the default): every gate once, in dependency order. `sequential`: feedback
+        loops are evaluated until they settle, starting from the given `state`.
+      type: string
+      enum: [combinational, sequential]
+      default: combinational
+
+    SimulationState:
+      description: |
+        Sequential mode: what the circuit remembers, the values of the gates on its feedback loops,
+        keyed by gate id. Copy it from the previous answer's `state`. A gate left out starts at 0.
+      type: object
+      additionalProperties: { $ref: "#/components/schemas/Bit" }
 
     SimulationResponse:
       type: object
-      required: [circuitId, circuitVersion, outputs]
+      required: [circuitId, circuitVersion, mode, outputs]
       properties:
         circuitId: { type: string }
         circuitVersion: { type: integer }
+        mode: { $ref: "#/components/schemas/SimulationMode" }
         outputs:
           description: The value of every OUTPUT gate, keyed by gate id.
           type: object
           additionalProperties: { $ref: "#/components/schemas/Bit" }
+        state:
+          description: Sequential mode only. What the loops settled to; send it with the next step.
+          allOf:
+            - { $ref: "#/components/schemas/SimulationState" }
         signals:
           description: With `include=signals`, the output signal of every gate.
           type: object
           additionalProperties: { $ref: "#/components/schemas/Bit" }
         order:
-          description: With `include=signals`, the gate ids in evaluation order.
+          description: Combinational mode, with `include=signals`. The gate ids in evaluation order.
           type: array
           items: { $ref: "#/components/schemas/GateId" }
 
     SimulationRun:
       type: object
       description: One recorded simulation.
-      required: [id, circuitVersion, kind, status, createdAt]
+      required: [id, circuitVersion, kind, mode, status, createdAt]
       properties:
         id: { type: string }
+        mode: { $ref: "#/components/schemas/SimulationMode" }
         circuitVersion:
           description: The version of the circuit that was simulated.
           type: integer
@@ -1348,6 +1382,9 @@ components:
           type: string
         line: { type: integer, minimum: 1 }
         column: { type: integer, minimum: 1 }
+        gateId:
+          description: The gate involved, when there is one, so a UI can highlight it.
+          type: string
 
     Problem:
       type: object
@@ -1386,6 +1423,7 @@ components:
             - feedback-loop
             - too-many-inputs
             - computation-too-large
+            - does-not-settle
             - invalid-fields
             - too-many-requests
             - internal-error

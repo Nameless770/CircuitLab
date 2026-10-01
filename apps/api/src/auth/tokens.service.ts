@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { LIMITS, invalidToken } from "@circuitlab/api-contract";
 import { Injectable, Logger } from "@nestjs/common";
 import { SignJWT, errors, jwtVerify } from "jose";
+import { Clock } from "../common/clock";
 import { AppConfig } from "../config/app-config";
 import type { AuthUser } from "./auth-user";
 
@@ -22,7 +23,10 @@ const AUDIENCE = "circuitlab-api";
 export class TokenService {
   private readonly key: Uint8Array;
 
-  constructor(config: AppConfig) {
+  constructor(
+    config: AppConfig,
+    private readonly clock: Clock,
+  ) {
     if (config.jwtSecret === undefined) {
       this.key = randomBytes(32);
       new Logger("Auth").warn("No JWT_SECRET set: tokens are signed with a random key and stop working when the API restarts");
@@ -37,8 +41,9 @@ export class TokenService {
       .setSubject(userId)
       .setIssuer(ISSUER)
       .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime(`${LIMITS.accessTokenSeconds}s`)
+      // Both times from the injected Clock, like every other time rule in the app.
+      .setIssuedAt(this.clock.now())
+      .setExpirationTime(new Date(this.clock.now().getTime() + LIMITS.accessTokenSeconds * 1000))
       .sign(this.key);
     return { token, expiresIn: LIMITS.accessTokenSeconds };
   }
@@ -57,6 +62,7 @@ export class TokenService {
         issuer: ISSUER,
         audience: AUDIENCE,
         requiredClaims: ["sub", "iat", "exp"],
+        currentDate: this.clock.now(),
       });
       if (typeof payload.sub !== "string" || payload.sub === "") throw invalidToken("The access token names no user.");
       return { id: payload.sub };

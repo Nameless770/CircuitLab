@@ -1,6 +1,6 @@
 # CircuitLab
 
-A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 8 are
+A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 9 are
 done:
 - **Phase 1:** a pure TypeScript engine.
 - **Phase 2:** streaming netlist import, and simulation on worker threads.
@@ -9,7 +9,9 @@ done:
 - **Phase 5:** the PostgreSQL schema.
 - **Phase 6:** the API connected to PostgreSQL through Prisma, with migrations.
 - **Phase 7:** accounts, JWT sign-in, private and public circuits, and sharing.
-- **Phase 8:** tests: 579 of them, unit and integration, run with `npm test`.
+- **Phase 8:** tests: unit and integration, run with `npm test`.
+- **Phase 9:** design patterns: a gate registry and factory, simulation strategies (a sequential
+  mode that runs latches and flip-flops), and dependency injection throughout.
 
 Everything compiles to CommonJS.
 
@@ -25,6 +27,7 @@ docs/api-design.md      why the API looks the way it does
 docs/database-design.md why the database looks the way it does
 docs/auth-design.md     accounts, tokens, and who may do what
 docs/testing.md         how it is tested, and what the tests found
+docs/design-patterns.md the patterns in the code, and why each one is there
 examples/               demos, and sample netlists in examples/netlists/
 */test/                 each package's tests (Vitest)
 ```
@@ -49,6 +52,7 @@ npm run demo:async     # phase 2: simulations on worker threads
 npm run demo:api       # phase 3: the API's answers, request by request
 npm run demo:http      # phase 4: the real server, driven over HTTP
 npm run demo:auth      # phase 7: accounts, sharing, and tokens, over HTTP
+npm run demo:patterns  # phase 9: the gate registry, both simulation strategies, an injected clock
 npm run start:api      # phase 4: runs the API on http://localhost:3000/v1
 npm run lint:api       # checks openapi.yaml (Redocly, fetched on first use)
 npm run db:start       # phase 6: a local PostgreSQL 18 on port 5433, nothing to install (leave it running)
@@ -197,36 +201,61 @@ development.
 
 ## Testing
 
-`npm test` runs 579 tests in about 15 seconds. [docs/testing.md](docs/testing.md) has the details.
+`npm test` runs 633 tests in about 15 seconds. [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.
 - **API:** tested over HTTP twice, in memory and on a fresh, migrated PostgreSQL.
   - **Contract:** every response is checked against `openapi.yaml`.
   - **Access rules:** run as the table they are.
-- **Do the tests catch bugs?** 12 deliberately planted bugs were all caught.
+- **Do the tests catch bugs?** 17 deliberately planted bugs were all caught.
+- **Time:** rules that depend on time (token and session expiry, sign-in throttling) are tested by
+  moving an injected clock instead of waiting.
 - **Coverage:** 94% of statements.
+
+## Design patterns
+
+[docs/design-patterns.md](docs/design-patterns.md) explains each pattern and why it is there. In short:
+- **Gate registry and gate factory.** Every gate type is defined once (inputs, behaviour,
+  description), and one factory turns gates stored as data into nodes a simulation can run.
+- **Strategy:** `combinational` or `sequential` simulation, chosen by name and used the same way.
+  - **Sequential mode** runs latches, flip-flops and counters. It finds the feedback loops
+    (Tarjan's strongly connected components) and evaluates each loop until it settles, starting
+    from the state the client sent with the step.
+  - **Oscillation:** a loop that never settles is reported (422 `does-not-settle`).
+- **Dependency injection throughout.**
+  - **The clock is injected,** so time rules can be tested by moving it, and only one place in the
+    app reads the real time.
+  - **The worker pool comes from a factory provider** instead of being built by the service that
+    uses it.
 
 ## Engine API
 
 ```ts
-import { compileCircuit, simulate, truthTable, validateCircuit } from "@circuitlab/engine";
+import { SequentialCircuit, compileCircuit, simulate, truthTable, validateCircuit } from "@circuitlab/engine";
 
 validateCircuit(json);                         // ValidationIssue[] (every problem, not just the first)
 const compiled = compileCircuit(json);         // validate + sort once; throws CircuitValidationError / CycleError
 simulate(compiled, { A: 1, B: 0 });            // { outputs, signals, order }; throws SimulationInputError
 truthTable(compiled, { offset: 0, limit: 100 });  // one page of rows; truthTableRows() is the lazy version
+
+const latch = new SequentialCircuit(json);    // what simulationStrategy("sequential").prepare(json) makes
+const step1 = latch.run({ S: 1, R: 0 });                      // { mode, outputs, signals, state, evaluations }
+const step2 = latch.run({ S: 0, R: 0 }, step1.state);         // the state carries memory between steps
 ```
 
 | Module | Contents |
 | --- | --- |
 | `types.ts` | `Bit`, `Gate` (discriminated union on `type`), `Wire`, `Circuit`, `GATE_TYPES` |
-| `gates.ts` | Pin counts per gate type (`GATE_ARITY`) and the gate logic |
+| `gates.ts` | The gate registry: `GATE_DEFINITIONS` (inputs, behaviour, description per type), and `GATE_ARITY` derived from it |
+| `gate-factory.ts` | `createGateNode`: a gate as data becomes a runnable node |
 | `validate.ts` | `validateCircuit`, `assertValidCircuit`: checks untrusted input |
 | `topological-sort.ts` | `topologicalSort`: Kahn's algorithm, with the loop path on failure |
 | `compile.ts` | `compileCircuit` / `CompiledCircuit`: a reusable evaluation plan |
-| `simulate.ts` | `simulate` |
+| `simulate.ts` | `simulate` (combinational) |
+| `strategies.ts` | `simulationStrategy(mode)`: the combinational and sequential strategies |
+| `sequential.ts`, `components.ts` | Sequential simulation, and Tarjan's strongly connected components |
 | `truth-table.ts` | `truthTable`, `truthTableRows`, `inputsForRow` (row number to input values, up to 53 inputs) |
-| `errors.ts` | `CircuitLabError`, the base of `CircuitValidationError`, `CycleError`, `SimulationInputError`; `toJSON()` and `reviveError()` |
+| `errors.ts` | `CircuitLabError`, the base of `CircuitValidationError`, `CycleError`, `SimulationInputError`, `OscillationError`; `toJSON()` and `reviveError()` |
 
 Circuit format: gates have an `id`, a `type` and an optional `label`. A wire connects the output
 of gate `from` to input pin `toPin` of gate `to`. Pins are numbered from 0 and must be used without
@@ -307,7 +336,7 @@ await pool.close();                             // waits for running tasks; dest
 | 6 | Prisma | Database access and migrations | Done |
 | 7 | Auth | JWT login, private and public circuits, sharing | Done |
 | 8 | Testing | Engine unit tests and API integration tests | Done |
-| 9 | Design patterns | Gate factory, strategy pattern for simulation modes, dependency injection | |
+| 9 | Design patterns | Gate factory, strategy pattern for simulation modes, dependency injection | Done |
 | 10 | Redis and queues | Cached results; large truth tables as BullMQ jobs | |
 | 11 | Docker | `docker-compose up` starts the API, Postgres, and Redis | |
 | 12 | System design | Design document for scaling to thousands of users | |

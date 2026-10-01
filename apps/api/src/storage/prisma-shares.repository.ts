@@ -2,6 +2,7 @@ import type { ShareRecord, ShareRole } from "@circuitlab/api-contract";
 import type { PrismaClient } from "@circuitlab/database";
 import { Injectable } from "@nestjs/common";
 import { SharesRepository } from "../circuits/shares.repository";
+import { Clock } from "../common/clock";
 import { UUID } from "./prisma-circuits.repository";
 import { PrismaService } from "./prisma.service";
 
@@ -17,7 +18,10 @@ interface UpsertRow {
 /** The `circuit_shares` table, through Prisma Client. */
 @Injectable()
 export class PrismaSharesRepository extends SharesRepository {
-  constructor(private readonly database: PrismaService) {
+  constructor(
+    private readonly database: PrismaService,
+    private readonly clock: Clock,
+  ) {
     super();
   }
 
@@ -41,11 +45,12 @@ export class PrismaSharesRepository extends SharesRepository {
    * updated by ON CONFLICT has the updating transaction's id there.
    */
   async upsert(circuitId: string, userId: string, role: ShareRole): Promise<{ readonly share: ShareRecord; readonly created: boolean }> {
+    const now = this.clock.now();
     const [row] = await this.prisma.$queryRaw<UpsertRow[]>`
       WITH s AS (
-        INSERT INTO circuit_shares (circuit_id, user_id, role)
-        VALUES (${circuitId}::uuid, ${userId}::uuid, ${role}::share_role)
-        ON CONFLICT (circuit_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()
+        INSERT INTO circuit_shares (circuit_id, user_id, role, created_at, updated_at)
+        VALUES (${circuitId}::uuid, ${userId}::uuid, ${role}::share_role, ${now}, ${now})
+        ON CONFLICT (circuit_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = EXCLUDED.updated_at
         RETURNING user_id, role, created_at, (xmax = 0) AS created
       )
       SELECT s.user_id, u.display_name, u.email, s.role::text AS role, s.created_at, s.created

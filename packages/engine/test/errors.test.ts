@@ -1,4 +1,4 @@
-import { CircuitLabError, CircuitValidationError, CycleError, SimulationInputError, reviveError } from "@circuitlab/engine";
+import { CircuitLabError, CircuitValidationError, CycleError, OscillationError, SimulationInputError, reviveError } from "@circuitlab/engine";
 import { describe, expect, it } from "vitest";
 
 const errors = [
@@ -8,6 +8,8 @@ const errors = [
   ]),
   new CycleError(["q", "qbar", "q"]),
   new SimulationInputError([{ code: "MISSING_INPUT", message: 'Input "B" is missing', inputId: "B" }]),
+  new SimulationInputError([{ code: "UNKNOWN_STATE_GATE", message: "x holds no state", stateGateId: "x" }]),
+  new OscillationError(["n0", "n1", "n2"]),
 ];
 
 describe("engine errors", () => {
@@ -37,6 +39,7 @@ describe("engine errors", () => {
     { name: "CycleError", cycle: [1, 2] },
     { name: "CircuitValidationError", issues: [{ code: "NOT_A_CODE", message: "x" }] },
     { name: "SimulationInputError", issues: "none" },
+    { name: "OscillationError", gates: "n0" },
   ])("revives nothing from %j", (data) => {
     expect(reviveError(data)).toBeUndefined();
   });

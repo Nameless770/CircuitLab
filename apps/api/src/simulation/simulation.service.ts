@@ -12,15 +12,17 @@ import {
 } from "@circuitlab/api-contract";
 import type {
   CircuitRecord,
+  SimulateRequest,
   SimulationResponse,
   SimulationRunList,
   TruthTableFormat,
   TruthTablePage,
   TruthTableQuery,
 } from "@circuitlab/api-contract";
-import { CircuitLabError, type SimulationInputs, type SimulationResult } from "@circuitlab/engine";
+import { CircuitLabError, type ModeResult, type SimulationInputs, type SimulationMode } from "@circuitlab/engine";
 import { Injectable, Logger } from "@nestjs/common";
 import type { AuthUser } from "../auth/auth-user";
+import { Clock } from "../common/clock";
 import { CircuitsService } from "../circuits/circuits.service";
 import { RunsRepository, type NewRun } from "./runs.repository";
 import { SimulationPoolService, type RowRange } from "./simulation-pool.service";
@@ -46,6 +48,7 @@ export class SimulationService {
     private readonly circuits: CircuitsService,
     private readonly pool: SimulationPoolService,
     private readonly runs: RunsRepository,
+    private readonly clock: Clock,
   ) {}
 
   /**
@@ -55,16 +58,17 @@ export class SimulationService {
    */
   async simulate(
     id: string,
-    inputs: SimulationInputs,
+    request: SimulateRequest,
     includeSignals: boolean,
     signal: AbortSignal,
     user: AuthUser | undefined,
   ): Promise<SimulationResponse> {
     const record = await this.circuits.get(id, user);
-    const run = { record, inputs, user, startedAt: new Date() };
-    let result: SimulationResult;
+    const { inputs, mode, state } = request;
+    const run = { record, inputs, mode, user, startedAt: this.clock.now() };
+    let result: ModeResult;
     try {
-      result = await this.pool.simulate(record, inputs, signal);
+      result = await this.pool.simulate(record, inputs, { mode, ...(state !== undefined && { state }) }, signal);
     } catch (error) {
       if (error instanceof CircuitLabError) await this.record(run, { errorCode: toProblem(error).body.code });
       throw error;
@@ -114,20 +118,21 @@ export class SimulationService {
    * bounded by the circuit, not by whatever a client sent.
    */
   private async record(
-    run: { readonly record: CircuitRecord; readonly inputs: SimulationInputs; readonly user: AuthUser | undefined; readonly startedAt: Date },
+    run: { readonly record: CircuitRecord; readonly inputs: SimulationInputs; readonly mode: SimulationMode; readonly user: AuthUser | undefined; readonly startedAt: Date },
     outcome: NewRun["outcome"],
   ): Promise<void> {
-    const { record, inputs, user, startedAt } = run;
+    const { record, inputs, mode, user, startedAt } = run;
     const known = new Set(record.summary.inputs);
     try {
       await this.runs.record({
         circuitId: record.id,
         circuitVersion: record.version,
         userId: user?.id ?? null,
+        mode,
         inputs: Object.fromEntries(Object.entries(inputs).filter(([name]) => known.has(name))),
         outcome,
         startedAt,
-        finishedAt: new Date(),
+        finishedAt: this.clock.now(),
       });
     } catch (error) {
       this.logger.error(`Could not record a simulation of circuit ${record.id}`, error instanceof Error ? error.stack : String(error));

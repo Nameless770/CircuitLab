@@ -159,16 +159,16 @@ DELETE FROM circuits WHERE id = $1 AND version = $2;
 
 -- name: record_simulation
 -- A finished, synchronous simulation. $1 circuit id, $2 version, $3 user id (or NULL), $4 inputs,
--- $5 outputs (NULL if failed), $6 error code (NULL if succeeded).
-INSERT INTO simulation_runs (circuit_id, circuit_version, user_id, kind, status, inputs, outputs, error_code, started_at, finished_at)
-VALUES ($1, $2, $3, 'simulate', CASE WHEN $6::text IS NULL THEN 'succeeded' ELSE 'failed' END::run_status,
+-- $5 outputs (NULL if failed), $6 error code (NULL if succeeded), $7 mode (combinational, sequential).
+INSERT INTO simulation_runs (circuit_id, circuit_version, user_id, kind, mode, status, inputs, outputs, error_code, started_at, finished_at)
+VALUES ($1, $2, $3, 'simulate', $7::simulation_mode, CASE WHEN $6::text IS NULL THEN 'succeeded' ELSE 'failed' END::run_status,
         $4, $5, $6, now(), clock_timestamp())
 RETURNING id;
 
 -- name: recent_runs
 -- What the circuit's owner sees: everyone's runs. $1 circuit id, $2 how many. Served by
 -- simulation_runs_circuit_idx.
-SELECT id, circuit_version, kind, status, inputs, outputs, error_code, created_at, finished_at
+SELECT id, circuit_version, kind, mode, status, inputs, outputs, error_code, created_at, finished_at
 FROM simulation_runs
 WHERE circuit_id = $1
 ORDER BY created_at DESC
@@ -176,7 +176,7 @@ LIMIT $2;
 
 -- name: recent_runs_by_user
 -- What anyone else sees: only their own runs. $1 circuit id, $2 how many, $3 user id.
-SELECT id, circuit_version, kind, status, inputs, outputs, error_code, created_at, finished_at
+SELECT id, circuit_version, kind, mode, status, inputs, outputs, error_code, created_at, finished_at
 FROM simulation_runs
 WHERE circuit_id = $1 AND user_id = $3
 ORDER BY created_at DESC

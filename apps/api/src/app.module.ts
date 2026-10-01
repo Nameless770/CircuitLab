@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from "@nestjs/common";
 import { APP_FILTER } from "@nestjs/core";
 import { AuthModule } from "./auth/auth.module";
 import { CircuitsModule } from "./circuits/circuits.module";
+import type { Clock } from "./common/clock";
 import { ProblemFilter } from "./common/problem.filter";
 import { AppConfig } from "./config/app-config";
 import { ConfigModule } from "./config/config.module";
@@ -12,7 +13,7 @@ import { StorageModule } from "./storage/storage.module";
 /**
  * The whole application:
  *
- *   ConfigModule      AppConfig for everyone (global)
+ *   ConfigModule      AppConfig and the Clock, for everyone (global)
  *   StorageModule     every repository: PostgreSQL or memory (global)
  *   AuthModule        /v1/auth, /v1/users   AuthService; AuthenticationGuard checks every request's token
  *   CircuitsModule    /v1/circuits          CircuitsService (who may do what) -> CircuitsRepository; sharing
@@ -23,10 +24,10 @@ import { StorageModule } from "./storage/storage.module";
  */
 @Module({})
 export class AppModule {
-  static register(config: AppConfig): DynamicModule {
+  static register(config: AppConfig, clock: Clock): DynamicModule {
     return {
       module: AppModule,
-      imports: [ConfigModule.forRoot(config), StorageModule.forRoot(config), AuthModule, CircuitsModule, SimulationModule, HealthModule],
+      imports: [ConfigModule.forRoot(config, clock), StorageModule.forRoot(config), AuthModule, CircuitsModule, SimulationModule, HealthModule],
       providers: [{ provide: APP_FILTER, useClass: ProblemFilter }],
     };
   }

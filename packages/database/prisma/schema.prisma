@@ -52,6 +52,13 @@ enum ShareRole {
   @@map("share_role")
 }
 
+enum SimulationMode {
+  combinational
+  sequential
+
+  @@map("simulation_mode")
+}
+
 enum RunStatus {
   queued
   running
@@ -141,22 +148,23 @@ model Wire {
 }
 
 model SimulationRun {
-  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  circuitId      String    @map("circuit_id") @db.Uuid
-  circuitVersion Int       @map("circuit_version")
-  userId         String?   @map("user_id") @db.Uuid
+  id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  circuitId      String         @map("circuit_id") @db.Uuid
+  circuitVersion Int            @map("circuit_version")
+  userId         String?        @map("user_id") @db.Uuid
   kind           RunKind
+  mode           SimulationMode @default(combinational)
   status         RunStatus
   inputs         Json?
-  rowOffset      BigInt?   @map("row_offset")
-  rowLimit       Int?      @map("row_limit")
+  rowOffset      BigInt?        @map("row_offset")
+  rowLimit       Int?           @map("row_limit")
   outputs        Json?
-  errorCode      String?   @map("error_code")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  startedAt      DateTime? @map("started_at") @db.Timestamptz(3)
-  finishedAt     DateTime? @map("finished_at") @db.Timestamptz(3)
-  circuit        Circuit   @relation(fields: [circuitId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  errorCode      String?        @map("error_code")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  startedAt      DateTime?      @map("started_at") @db.Timestamptz(3)
+  finishedAt     DateTime?      @map("finished_at") @db.Timestamptz(3)
+  circuit        Circuit        @relation(fields: [circuitId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user           User?          @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([circuitId, createdAt(sort: Desc)], map: "simulation_runs_circuit_idx")
   @@index([userId, createdAt(sort: Desc)], map: "simulation_runs_user_idx")

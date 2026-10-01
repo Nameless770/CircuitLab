@@ -4,6 +4,7 @@ import type { CircuitHeader, CircuitMetadataPatch, CircuitRecord } from "@circui
 import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import type { AccessFacts } from "../circuits/circuit-access";
 import { CircuitsRepository, type CircuitDraft, type CircuitQuery } from "../circuits/circuits.repository";
+import { Clock } from "../common/clock";
 import { InMemorySharesRepository } from "./in-memory-shares.repository";
 import { InMemoryUsersRepository } from "./in-memory-users.repository";
 
@@ -20,6 +21,7 @@ export class InMemoryCircuitsRepository extends CircuitsRepository implements On
   constructor(
     private readonly users: InMemoryUsersRepository,
     private readonly shares: InMemorySharesRepository,
+    private readonly clock: Clock,
   ) {
     super();
   }
@@ -66,7 +68,7 @@ export class InMemoryCircuitsRepository extends CircuitsRepository implements On
   async create(draft: CircuitDraft, ownerId: string): Promise<CircuitRecord> {
     const owner = this.users.summary(ownerId);
     if (owner === undefined) throw new Error(`No user ${ownerId}`); // the foreign key, in SQL
-    const now = new Date();
+    const now = this.clock.now();
     const record: CircuitRecord = Object.freeze({
       id: randomUUID(),
       owner: { id: owner.id, displayName: owner.displayName },
@@ -102,7 +104,7 @@ export class InMemoryCircuitsRepository extends CircuitsRepository implements On
   private update(id: string, expectedVersion: number | undefined, changes: Partial<CircuitRecord>): CircuitRecord | undefined {
     const current = this.circuits.get(id);
     if (current === undefined || (expectedVersion !== undefined && current.version !== expectedVersion)) return undefined;
-    const next: CircuitRecord = Object.freeze({ ...current, ...changes, version: current.version + 1, updatedAt: new Date() });
+    const next: CircuitRecord = Object.freeze({ ...current, ...changes, version: current.version + 1, updatedAt: this.clock.now() });
     this.circuits.set(id, next);
     return next;
   }

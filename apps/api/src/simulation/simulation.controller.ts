@@ -34,8 +34,7 @@ export class SimulationController {
     @RequestSignal(LIMITS.simulationTimeoutMs) signal: AbortSignal,
   ): Promise<SimulationResponse> {
     requestMediaType("simulateCircuit", header(request.headers["content-type"]));
-    const { inputs } = parseSimulateRequest(request.body);
-    return this.simulation.simulate(id, inputs, query.includeSignals, signal, user);
+    return this.simulation.simulate(id, parseSimulateRequest(request.body), query.includeSignals, signal, user);
   }
 
   @Get("runs")

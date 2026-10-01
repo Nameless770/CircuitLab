@@ -1,7 +1,7 @@
 // TypeScript mirrors of the schemas in openapi.yaml (same names, except where noted). The contract
 // checks validate real responses against the spec, which keeps these honest.
 
-import type { Bit, Gate, TruthTableRow, Wire } from "@circuitlab/engine";
+import type { Bit, Gate, SimulationMode, TruthTableRow, Wire } from "@circuitlab/engine";
 
 /** Schema `CircuitInput`: a circuit as a client sends it. */
 export interface CircuitInput {
@@ -72,14 +72,21 @@ export interface ValidationReport {
   readonly summary: CircuitSummary;
 }
 
+/** Schema `SimulateRequest`, with the default mode filled in. */
 export interface SimulateRequest {
   readonly inputs: Readonly<Record<string, Bit>>;
+  readonly mode: SimulationMode;
+  /** Sequential mode: what the loops remembered from the previous step. */
+  readonly state?: Readonly<Record<string, Bit>>;
 }
 
 export interface SimulationResponse {
   readonly circuitId: string;
   readonly circuitVersion: number;
+  readonly mode: SimulationMode;
   readonly outputs: Readonly<Record<string, Bit>>;
+  /** Sequential mode: what the loops settled to, for the next step. */
+  readonly state?: Readonly<Record<string, Bit>>;
   readonly signals?: Readonly<Record<string, Bit>>;
   readonly order?: readonly string[];
 }
@@ -107,6 +114,7 @@ export interface SimulationRunResource {
   readonly id: string;
   readonly circuitVersion: number;
   readonly kind: "simulate" | "truth_table";
+  readonly mode: SimulationMode;
   readonly status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   readonly inputs?: Readonly<Record<string, unknown>>;
   readonly outputs?: Readonly<Record<string, Bit>>;

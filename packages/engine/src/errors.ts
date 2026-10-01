@@ -36,12 +36,15 @@ export interface ValidationIssue {
   readonly pin?: number;
 }
 
-/** Problems `simulate` can report about its `inputs` argument. */
+/** Problems a simulation can report about its `inputs`, and, in sequential mode, its `state`. */
 export const INPUT_ISSUE_CODES = [
   "MALFORMED_INPUTS",
   "MISSING_INPUT",
   "UNKNOWN_INPUT",
   "INVALID_INPUT_VALUE",
+  "MALFORMED_STATE",
+  "UNKNOWN_STATE_GATE",
+  "INVALID_STATE_VALUE",
 ] as const;
 
 export type InputIssueCode = (typeof INPUT_ISSUE_CODES)[number];
@@ -51,6 +54,8 @@ export interface InputIssue {
   readonly message: string;
   /** The input name involved (absent when the whole `inputs` value is malformed). */
   readonly inputId?: string;
+  /** For a problem with the `state`: the gate id involved (absent when the whole `state` is malformed). */
+  readonly stateGateId?: string;
 }
 
 /** Plain-data form of an error, as returned by `CircuitLabError.toJSON`. */
@@ -117,6 +122,25 @@ export class SimulationInputError extends CircuitLabError {
 }
 
 /**
+ * In sequential simulation: a feedback loop kept changing instead of settling. A ring of an odd
+ * number of inverters does this, as real hardware would (it oscillates).
+ */
+export class OscillationError extends CircuitLabError {
+  override readonly name = "OscillationError";
+  /** The gates of the loop that kept changing, in declaration order. */
+  readonly gates: readonly string[];
+
+  constructor(gates: readonly string[]) {
+    super(`Circuit does not settle: the loop of gates ${gates.join(", ")} keeps changing`);
+    this.gates = gates;
+  }
+
+  override toJSON(): ErrorData & { readonly gates: readonly string[] } {
+    return { name: this.name, message: this.message, gates: this.gates };
+  }
+}
+
+/**
  * Rebuilds an engine error from its `toJSON()` data, e.g. after it crossed a worker thread or a
  * job queue. Returns `undefined` for anything else. The data's shape is checked, but it is meant
  * to come from your own services, not from end users.
@@ -130,6 +154,8 @@ export function reviveError(data: unknown): CircuitLabError | undefined {
       return Array.isArray(data.cycle) && data.cycle.every((id) => typeof id === "string") ? new CycleError(data.cycle) : undefined;
     case "SimulationInputError":
       return isIssueList(data.issues, INPUT_ISSUE_CODES) ? new SimulationInputError(data.issues) : undefined;
+    case "OscillationError":
+      return Array.isArray(data.gates) && data.gates.every((id) => typeof id === "string") ? new OscillationError(data.gates) : undefined;
     default:
       return undefined;
   }

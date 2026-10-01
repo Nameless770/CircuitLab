@@ -1,10 +1,10 @@
-import { inputsForRow, type Bit, type ErrorData, type TruthTable, type TruthTableRange } from "@circuitlab/engine";
+import { inputsForRow, type Bit, type ErrorData, type SimulationMode, type TruthTable, type TruthTableRange } from "@circuitlab/engine";
 
 // Messages exchanged between SimulationPool (main thread) and worker.ts. Everything here is
 // copied between threads with the structured clone algorithm, so it must be plain data.
 
 export type TaskPayload =
-  | { readonly kind: "simulate"; readonly circuit: unknown; readonly inputs: unknown }
+  | { readonly kind: "simulate"; readonly circuit: unknown; readonly inputs: unknown; readonly mode: SimulationMode; readonly state: unknown }
   | { readonly kind: "truthTable"; readonly circuit: unknown; readonly range: TruthTableRange };
 
 export type TaskRequest = TaskPayload & { readonly id: number };

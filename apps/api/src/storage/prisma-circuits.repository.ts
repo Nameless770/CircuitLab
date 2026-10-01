@@ -15,6 +15,7 @@ import type { Gate, Wire } from "@circuitlab/engine";
 import { Injectable } from "@nestjs/common";
 import type { AccessFacts } from "../circuits/circuit-access";
 import { CircuitsRepository, type CircuitDraft, type CircuitQuery } from "../circuits/circuits.repository";
+import { Clock } from "../common/clock";
 import { PrismaService } from "./prisma.service";
 
 /** Ids are UUIDs. Anything else can't name a stored row, and PostgreSQL would reject it as a uuid. */
@@ -53,7 +54,10 @@ interface HeaderRow {
  */
 @Injectable()
 export class PrismaCircuitsRepository extends CircuitsRepository {
-  constructor(private readonly database: PrismaService) {
+  constructor(
+    private readonly database: PrismaService,
+    private readonly clock: Clock,
+  ) {
     super();
   }
 
@@ -126,9 +130,10 @@ export class PrismaCircuitsRepository extends CircuitsRepository {
   }
 
   async create(draft: CircuitDraft, ownerId: string): Promise<CircuitRecord> {
+    const now = this.clock.now();
     const row = await this.prisma.$transaction(async (tx) => {
       const circuit = await tx.circuit.create({
-        data: { ...columns(draft), ownerId, gates: { createMany: { data: gateRows(draft) } } },
+        data: { ...columns(draft), ownerId, createdAt: now, updatedAt: now, gates: { createMany: { data: gateRows(draft) } } },
         include: { owner: OWNER },
       });
       await tx.wire.createMany({ data: wireRows(circuit.id, draft) });
@@ -145,7 +150,7 @@ export class PrismaCircuitsRepository extends CircuitsRepository {
       // locks the row until the transaction ends, so concurrent replacements run one after another.
       const [updated] = await tx.circuit.updateManyAndReturn({
         where: { id, version: expectedVersion }, // an undefined version is no condition at all
-        data: { ...columns(draft), version: { increment: 1 }, updatedAt: new Date() },
+        data: { ...columns(draft), version: { increment: 1 }, updatedAt: this.clock.now() },
       });
       if (updated === undefined) return undefined;
       await tx.gate.deleteMany({ where: { circuitId: id } }); // the wires go with them
@@ -167,7 +172,7 @@ export class PrismaCircuitsRepository extends CircuitsRepository {
           ...(patch.description !== undefined && { description: patch.description }),
           ...(patch.visibility !== undefined && { visibility: patch.visibility }),
           version: { increment: 1 },
-          updatedAt: new Date(),
+          updatedAt: this.clock.now(),
         },
       });
       if (count === 0) return undefined;

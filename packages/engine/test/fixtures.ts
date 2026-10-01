@@ -83,6 +83,50 @@ export function c17Reference(n1: boolean, n2: boolean, n3: boolean, n6: boolean,
 export const srLatch = (): Circuit =>
   circuit("SR latch", ["S", "INPUT"], ["R", "INPUT"], ["q", "NOR", "R", "qbar"], ["qbar", "NOR", "S", "q"], ["Q", "OUTPUT", "q"]);
 
+/** The gates of a gated D latch from NAND gates: q follows d while e is 1, and holds while e is 0. Returns its q. */
+function dLatchGates(prefix: string, d: string, e: string): { specs: GateSpec[]; q: string } {
+  const q = `${prefix}q`;
+  return {
+    q,
+    specs: [
+      [`${prefix}nd`, "NOT", d],
+      [`${prefix}s`, "NAND", d, e],
+      [`${prefix}r`, "NAND", `${prefix}nd`, e],
+      [q, "NAND", `${prefix}s`, `${prefix}qb`],
+      [`${prefix}qb`, "NAND", `${prefix}r`, q],
+    ],
+  };
+}
+
+/** A gated D latch: Q follows D while E is 1, and remembers it while E is 0. */
+export function dLatch(): Circuit {
+  const latch = dLatchGates("", "D", "E");
+  return circuit("D latch", ["D", "INPUT"], ["E", "INPUT"], ...latch.specs, ["Q", "OUTPUT", latch.q]);
+}
+
+/**
+ * A master-slave D flip-flop: two D latches, the master open while CLK is 0 and the slave while
+ * CLK is 1, so Q takes D's value only when CLK rises from 0 to 1.
+ */
+export function dFlipFlop(): Circuit {
+  const master = dLatchGates("m", "D", "nclk");
+  const slave = dLatchGates("s", master.q, "CLK");
+  return circuit("D flip-flop", ["D", "INPUT"], ["CLK", "INPUT"], ["nclk", "NOT", "CLK"], ...master.specs, ...slave.specs, ["Q", "OUTPUT", slave.q]);
+}
+
+/** A flip-flop fed its own inverted output: Q toggles on every rising clock edge, halving the frequency. */
+export function divideByTwo(): Circuit {
+  const master = dLatchGates("m", "d", "nclk");
+  const slave = dLatchGates("s", master.q, "CLK");
+  return circuit("Divide by two", ["CLK", "INPUT"], ["nclk", "NOT", "CLK"], ["d", "NOT", slave.q], ...master.specs, ...slave.specs, ["Q", "OUTPUT", slave.q]);
+}
+
+/** `n` inverters in a ring. An odd ring has no stable state (it oscillates); an even one is a latch. */
+export function inverterRing(n: number): Circuit {
+  const specs: GateSpec[] = Array.from({ length: n }, (_, k): GateSpec => [`n${k}`, "NOT", `n${(k + n - 1) % n}`]);
+  return circuit(`${n}-inverter ring`, ...specs, ["Y", "OUTPUT", "n0"]);
+}
+
 /**
  * An n-bit ripple-carry adder. Inputs a(n-1)..a0, b(n-1)..b0, cin, so a truth-table row number
  * spells A, B, and cin in binary; outputs cout, s(n-1)..s0, so the output bits spell the sum.

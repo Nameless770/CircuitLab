@@ -5,6 +5,7 @@ import { accessSuite } from "./access";
 import { accountsSuite } from "./accounts";
 import { circuitsSuite } from "./circuits";
 import { sharingSuite } from "./sharing";
+import { sequentialSuite } from "./sequential";
 import { simulationSuite } from "./simulation";
 
 /** The whole API, over HTTP, against one kind of storage. */
@@ -28,6 +29,7 @@ export function describeApi(storage: Storage): void {
   accessSuite(context);
   circuitsSuite(context);
   simulationSuite(context);
+  sequentialSuite(context);
   sharingSuite(context);
 
   // Last: every operation in openapi.yaml was called at least once with a success status.

@@ -43,9 +43,14 @@ Phase 4 wires it into NestJS, and phases 5 and 6 add storage.
 - **`simulate` is `POST`.** It takes a body, and it records a simulation run.
 - **The truth table is `GET`.** It is a safe, cacheable read of rows that depend only on the circuit version.
 
-**Stored circuits may contain feedback loops.** A latch is valid structure, and phase 9's sequential
-simulation mode will be able to run it. The summary reports the loop, and combinational simulation
-answers 422 `feedback-loop`.
+**Stored circuits may contain feedback loops.** A latch is valid structure. The summary reports the
+loop. Combinational simulation (the default) answers 422 `feedback-loop`; sequential simulation
+(phase 9, `"mode": "sequential"`) runs it one step per request.
+
+**Sequential steps keep no state on the server.** Each answer carries the circuit's `state` (the
+values of the gates on its loops), and the client sends it back with the next step, like a page
+cursor. So any API instance can serve any step, and nothing needs cleaning up when a client walks
+away.
 
 **Gate ids** are limited to netlist-safe names (letters, digits, `_ . $ [ ]`), for two reasons:
 - **Every stored circuit can be exported as a netlist.**
@@ -95,7 +100,7 @@ answers 422 `feedback-loop`.
 | 409 | `version-conflict` (a truth-table page from a newer circuit version), `email-taken` |
 | 412 | `precondition-failed` (stale `If-Match`) |
 | 413 | `content-too-large` |
-| 422 | `invalid-circuit`, `invalid-netlist`, `invalid-inputs`, `feedback-loop`, `too-many-inputs`, `computation-too-large`, `invalid-fields` (account and sharing bodies) |
+| 422 | `invalid-circuit`, `invalid-netlist`, `invalid-inputs`, `feedback-loop`, `does-not-settle` (sequential mode), `too-many-inputs`, `computation-too-large`, `invalid-fields` (account and sharing bodies) |
 | 429 | `too-many-requests` (failed sign-ins), with `Retry-After` |
 | 500 | `internal-error`: the body never reveals details; the server logs them |
 | 503 | `server-busy` and `server-unavailable` (shutting down, or the database is unreachable), with `Retry-After`; `simulation-timeout` |
@@ -174,5 +179,6 @@ Simulations run on a fixed pool of worker threads (phase 2).
 | Phase | Adds |
 | --- | --- |
 | 7 | Done: JWT authentication, `visibility`, and sharing, as planned. A circuit you may not see answers 404, not 403. See [auth-design.md](auth-design.md) |
+| 9 | Done: `mode` and `state` on `simulate`, `mode` on responses and recorded runs, and 422 `does-not-settle`. All additions: a client that never sends `mode` sees the same API, plus a `mode` field. See [design-patterns.md](design-patterns.md) |
 | 10 | Truth tables too large for one response as background jobs: `202 Accepted` with a job URL to poll. Also `Idempotency-Key` for safely retried POSTs, and 429 with `RateLimit` headers |
 | 13 | Swagger UI serving `openapi.yaml`, and documentation pages at each problem `type` URL |

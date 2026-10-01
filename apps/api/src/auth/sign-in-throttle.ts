@@ -1,5 +1,6 @@
 import { LIMITS, tooManySignInAttempts } from "@circuitlab/api-contract";
 import { Injectable } from "@nestjs/common";
+import { Clock } from "../common/clock";
 
 /** Entries kept at most; beyond that the oldest are dropped, so the map can't grow without bound. */
 const MAX_ENTRIES = 100_000;
@@ -17,15 +18,19 @@ const PRUNE_TO = MAX_ENTRIES * 0.9;
 export class SignInThrottle {
   private readonly failures = new Map<string, { count: number; readonly since: number }>();
 
+  constructor(private readonly clock: Clock) {}
+
   /** @throws ApiError `too-many-requests` (429) while the key is blocked */
-  check(key: string, now = Date.now()): void {
+  check(key: string): void {
+    const now = this.clock.now().getTime();
     const entry = this.current(key, now);
     if (entry !== undefined && entry.count >= LIMITS.signIn.maxFailures) {
       throw tooManySignInAttempts((entry.since + LIMITS.signIn.windowSeconds * 1000 - now) / 1000);
     }
   }
 
-  failed(key: string, now = Date.now()): void {
+  failed(key: string): void {
+    const now = this.clock.now().getTime();
     const entry = this.current(key, now);
     if (entry !== undefined) {
       entry.count++;

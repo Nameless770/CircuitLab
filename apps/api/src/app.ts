@@ -4,6 +4,7 @@ import { VersioningType, type LogLevel } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
+import { SystemClock, type Clock } from "./common/clock";
 import { jsonBody } from "./common/json-body";
 import { AppConfig } from "./config/app-config";
 
@@ -12,6 +13,8 @@ export interface CreateAppOptions {
   readonly config?: AppConfig;
   /** Log levels to print. Default: Nest's usual set. */
   readonly logLevels?: LogLevel[];
+  /** Default: the system's. Tests pass one they can move forward. */
+  readonly clock?: Clock;
 }
 
 /**
@@ -20,7 +23,7 @@ export interface CreateAppOptions {
  */
 export async function createApp(options: CreateAppOptions = {}): Promise<NestExpressApplication> {
   const config = options.config ?? AppConfig.fromEnvironment();
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.register(config), {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.register(config, options.clock ?? new SystemClock()), {
     bodyParser: false,
     ...(options.logLevels !== undefined && { logger: options.logLevels }),
   });

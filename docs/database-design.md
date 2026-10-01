@@ -1,4 +1,4 @@
-# CircuitLab database design (phases 5 to 7)
+# CircuitLab database design (phases 5 to 9)
 
 The schema is the SQL migrations in
 [`packages/database/prisma/migrations`](../packages/database/prisma/migrations) (PostgreSQL 18),
@@ -128,7 +128,9 @@ cheap and complete. Rules about the circuit as a whole need the whole graph, and
 in one place, the engine (phase 1). Repeating them in triggers would mean two copies of the same
 rules that could drift apart.
 
-`npm run db:check` tries 29 bad rows, and each is refused by the expected rule. It also runs every
+`npm run db:check` tries 30 bad rows, and each is refused by the expected rule. It also checks that
+the `gate_type` and `simulation_mode` enums list exactly the engine's gate registry and simulation
+strategies (phase 9), so adding a gate type without its migration fails the check. And it runs every
 one of the 29 named queries in queries.sql, and fails if one was never run.
 
 ## Order is data
@@ -256,7 +258,7 @@ is there to enforce. So it goes the other way:
    `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
    against the migrated database. Any difference fails the check.
 
-An applied migration is never edited; a change is a new migration. There are four:
+An applied migration is never edited; a change is a new migration. There are five:
 
 | Migration | What and why |
 | --- | --- |
@@ -264,6 +266,7 @@ An applied migration is never edited; a change is a new migration. There are fou
 | `20261001120000_feedback_loop_empty_array` | "No feedback loop" becomes an empty array instead of NULL |
 | `20261001180000_millisecond_timestamps` | Timestamps stored to the millisecond (`timestamptz(3)`) |
 | `20261001210000_accounts_and_sharing` | Phase 7: owners, visibility, shares, sessions, and the new list indexes |
+| `20261001230000_simulation_mode` | Phase 9: each run's `mode` (`combinational` or `sequential`, earlier runs combinational), and a CHECK that truth tables are combinational |
 
 The second and third came from bugs found while connecting Prisma:
 

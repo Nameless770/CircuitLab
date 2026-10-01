@@ -2,7 +2,7 @@
 // and always answers with a TaskResponse, so the pool never has to guess what happened.
 
 import { parentPort, type TransferListItem } from "node:worker_threads";
-import { CircuitLabError, compileCircuit, simulate, truthTable, type SimulationInputs } from "@circuitlab/engine";
+import { CircuitLabError, compileCircuit, simulationStrategy, truthTable, type SimulationInputs, type SimulationState } from "@circuitlab/engine";
 import { pack, type TaskFailure, type TaskRequest, type TaskResponse } from "./protocol";
 
 const port = parentPort;
@@ -33,7 +33,11 @@ function execute(request: TaskRequest): { value: unknown; transfer: TransferList
   // The circuit arrives as plain data, so it goes through full validation here.
   switch (request.kind) {
     case "simulate":
-      return { value: simulate(compileCircuit(request.circuit), request.inputs as SimulationInputs), transfer: [] };
+      // The mode picks the strategy; every strategy is used the same way.
+      return {
+        value: simulationStrategy(request.mode).prepare(request.circuit).run(request.inputs as SimulationInputs, request.state as SimulationState | undefined),
+        transfer: [],
+      };
     case "truthTable": {
       const packed = pack(truthTable(compileCircuit(request.circuit), request.range));
       return { value: packed, transfer: [packed.outputs.buffer] };

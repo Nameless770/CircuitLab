@@ -1,4 +1,4 @@
-import type { Circuit, SimulationInputs, SimulationResult, TruthTable } from "@circuitlab/engine";
+import type { Circuit, ModeResult, SimulationInputs, SimulationMode, SimulationState, TruthTable } from "@circuitlab/engine";
 import { SimulationPool, type PoolStats } from "@circuitlab/runner";
 import { Injectable, Logger, type OnApplicationShutdown } from "@nestjs/common";
 import { AppConfig } from "../config/app-config";
@@ -14,22 +14,22 @@ export interface RowRange {
  *
  * Only a circuit's gates and wires are sent to a worker: they are all the engine needs, and
  * everything sent is copied between threads.
+ *
+ * The pool itself is made by SimulationModule (`createSimulationPool`) and injected, rather than
+ * constructed here: this service uses a pool and manages its shutdown, but doesn't decide how one
+ * is built.
  */
 @Injectable()
 export class SimulationPoolService implements OnApplicationShutdown {
   private readonly logger = new Logger(SimulationPoolService.name);
-  private readonly pool: SimulationPool;
+  constructor(
+    private readonly pool: SimulationPool,
+    private readonly config: AppConfig,
+  ) {}
 
-  constructor(private readonly config: AppConfig) {
-    this.pool = new SimulationPool({
-      ...(config.simulationWorkers !== undefined && { size: config.simulationWorkers }),
-      maxQueue: config.simulationQueue,
-      maxWorkerMemoryMb: config.workerMemoryMb,
-    });
-  }
-
-  simulate(circuit: Circuit, inputs: SimulationInputs, signal: AbortSignal): Promise<SimulationResult> {
-    return this.pool.simulate(essentials(circuit), inputs, { signal });
+  /** One simulation, in the given mode; the worker picks the engine's strategy for it. */
+  simulate(circuit: Circuit, inputs: SimulationInputs, how: { readonly mode: SimulationMode; readonly state?: SimulationState }, signal: AbortSignal): Promise<ModeResult> {
+    return this.pool.simulate(essentials(circuit), inputs, { mode: how.mode, ...(how.state !== undefined && { state: how.state }), signal });
   }
 
   truthTable(circuit: Circuit, range: RowRange, signal: AbortSignal): Promise<TruthTable> {
@@ -64,6 +64,15 @@ export class SimulationPoolService implements OnApplicationShutdown {
       clearTimeout(deadline);
     }
   }
+}
+
+/** The pool, as SimulationModule provides it: sized from the configuration. */
+export function createSimulationPool(config: AppConfig): SimulationPool {
+  return new SimulationPool({
+    ...(config.simulationWorkers !== undefined && { size: config.simulationWorkers }),
+    maxQueue: config.simulationQueue,
+    maxWorkerMemoryMb: config.workerMemoryMb,
+  });
 }
 
 function essentials(circuit: Circuit): Circuit {

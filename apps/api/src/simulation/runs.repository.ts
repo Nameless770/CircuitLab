@@ -1,5 +1,5 @@
 import type { RunRecord } from "@circuitlab/api-contract";
-import type { Bit } from "@circuitlab/engine";
+import type { Bit, SimulationMode } from "@circuitlab/engine";
 
 /** A finished simulation, about to be recorded. */
 export interface NewRun {
@@ -7,6 +7,7 @@ export interface NewRun {
   readonly circuitVersion: number;
   /** Who ran it; null when signed out (public circuits can be simulated by anyone). */
   readonly userId: string | null;
+  readonly mode: SimulationMode;
   /** The input values as sent, limited to the circuit's own inputs. */
   readonly inputs: Readonly<Record<string, unknown>>;
   /** Its outputs when it succeeded, or the problem code the API answered with when it failed. */

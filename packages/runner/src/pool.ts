@@ -5,8 +5,12 @@ import { Worker } from "node:worker_threads";
 import {
   CompiledCircuit,
   reviveError,
+  type CombinationalResult,
+  type ModeResult,
+  type SequentialResult,
   type SimulationInputs,
-  type SimulationResult,
+  type SimulationMode,
+  type SimulationState,
   type TruthTable,
   type TruthTableRange,
 } from "@circuitlab/engine";
@@ -30,6 +34,14 @@ export interface TaskOptions {
    * The promise rejects with `signal.reason`, so `AbortSignal.timeout(ms)` gives a TimeoutError.
    */
   readonly signal?: AbortSignal;
+}
+
+/** How to simulate: the mode picks the engine's strategy (see the engine's strategies.ts). */
+export interface SimulateOptions extends TaskOptions {
+  /** Default "combinational". */
+  readonly mode?: SimulationMode;
+  /** What the circuit remembered from the previous step (sequential mode). */
+  readonly state?: SimulationState;
 }
 
 export interface PageOptions extends TaskOptions {
@@ -85,9 +97,16 @@ export class SimulationPool {
     this.maxWorkerMemoryMb = positiveInteger("maxWorkerMemoryMb", options.maxWorkerMemoryMb ?? 512);
   }
 
-  /** Simulates one set of inputs. `circuit` is plain data (e.g. parsed JSON) and is validated in the worker. */
-  simulate(circuit: unknown, inputs: SimulationInputs, options?: TaskOptions): Promise<SimulationResult> {
-    return this.run({ kind: "simulate", circuit, inputs }, options) as Promise<SimulationResult>;
+  /**
+   * Simulates one set of inputs, combinationally unless `options.mode` says otherwise. `circuit` is
+   * plain data (e.g. parsed JSON) and is validated in the worker.
+   */
+  simulate(circuit: unknown, inputs: SimulationInputs, options?: TaskOptions & { readonly mode?: "combinational" }): Promise<CombinationalResult>;
+  simulate(circuit: unknown, inputs: SimulationInputs, options: TaskOptions & { readonly mode: "sequential"; readonly state?: SimulationState }): Promise<SequentialResult>;
+  simulate(circuit: unknown, inputs: SimulationInputs, options?: SimulateOptions): Promise<ModeResult>;
+  simulate(circuit: unknown, inputs: SimulationInputs, options: SimulateOptions = {}): Promise<ModeResult> {
+    const { mode = "combinational", state, ...task } = options;
+    return this.run({ kind: "simulate", circuit, inputs, mode, state }, task) as Promise<ModeResult>;
   }
 
   /**

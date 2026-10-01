@@ -4,7 +4,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client";
 
-export { CircuitVisibility, GateType, Prisma, PrismaClient, RunKind, RunStatus, ShareRole } from "./generated/prisma/client";
+export { CircuitVisibility, GateType, Prisma, PrismaClient, RunKind, RunStatus, ShareRole, SimulationMode } from "./generated/prisma/client";
 export type {
   Circuit as CircuitRow,
   CircuitShare as CircuitShareRow,

@@ -9,6 +9,7 @@ import {
 } from "@circuitlab/api-contract";
 import type { AuthSession, RegisterRequest, SignInRequest, UserRecord, UserResource } from "@circuitlab/api-contract";
 import { Injectable } from "@nestjs/common";
+import { Clock } from "../common/clock";
 import type { AuthUser } from "./auth-user";
 import { PasswordsService } from "./passwords.service";
 import { formatRefreshToken, hashSecret, newSecret, parseRefreshToken } from "./refresh-tokens";
@@ -34,6 +35,7 @@ export class AuthService {
     private readonly tokens: TokenService,
     private readonly passwords: PasswordsService,
     private readonly throttle: SignInThrottle,
+    private readonly clock: Clock,
   ) {}
 
   /** @throws ApiError `email-taken` (409) */
@@ -71,7 +73,7 @@ export class AuthService {
     const parts = parseRefreshToken(refreshToken);
     if (parts === undefined) throw invalidToken("This is not a refresh token from this API.");
     const secret = newSecret();
-    const now = new Date();
+    const now = this.clock.now();
     const userId = await this.sessions.rotate(parts.sessionId, hashSecret(parts.secret), hashSecret(secret), now, expiry(now));
     if (userId === undefined) {
       // The session is unknown or expired, or its secret was already replaced: a copy of an old
@@ -99,7 +101,7 @@ export class AuthService {
 
   private async startSession(user: UserRecord): Promise<AuthSession> {
     const secret = newSecret();
-    const now = new Date();
+    const now = this.clock.now();
     const sessionId = await this.sessions.create(user.id, hashSecret(secret), now, expiry(now));
     return this.issue(user, sessionId, secret);
   }

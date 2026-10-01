@@ -18,6 +18,7 @@ export class InMemoryRunsRepository extends RunsRepository {
         id: randomUUID(),
         circuitVersion: run.circuitVersion,
         kind: "simulate",
+        mode: run.mode,
         status: "outputs" in run.outcome ? "succeeded" : "failed",
         inputs: structuredClone(run.inputs),
         outputs: "outputs" in run.outcome ? structuredClone(run.outcome.outputs) : null,

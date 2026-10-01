@@ -1,26 +1,25 @@
-import { GATE_LOGIC, type Evaluator } from "./gates";
+import { evaluateNode, type GateNode } from "./gate-factory";
+import { checkArguments, type SimulationInputs, type SimulationState } from "./inputs";
 import { at } from "./internal/util";
+import { buildNetwork } from "./network";
+import type { CombinationalResult, PreparedCircuit } from "./results";
 import { topologicalSort } from "./topological-sort";
 import type { Bit } from "./types";
 import { assertValidCircuit } from "./validate";
 
-/**
- * One gate's work during a simulation. `slot` is the gate's declaration index and its position
- * in the signal array; `sources` are the slots of the gates driving it, ordered by input pin.
- */
-export type Step =
-  | { readonly kind: "input"; readonly slot: number; readonly input: number } // index into `inputIds`
-  | { readonly kind: "const"; readonly slot: number; readonly value: Bit }
-  | { readonly kind: "logic"; readonly slot: number; readonly evaluate: Evaluator; readonly sources: readonly number[] };
+/** One gate's work during a combinational simulation, as made by the gate factory. */
+export type Step = GateNode;
 
 /**
- * A circuit that has been validated and sorted once, ready to simulate any number of times.
+ * A circuit validated and sorted once, ready to simulate combinationally any number of times: the
+ * combinational strategy's prepared circuit (see strategies.ts).
  *
  * The constructor is the only place validation and sorting happen, so any `CompiledCircuit`
  * value is known to describe a valid, loop-free circuit. It keeps its own copy of everything
  * it needs, so later changes to the source object don't affect it.
  */
-export class CompiledCircuit {
+export class CompiledCircuit implements PreparedCircuit {
+  readonly mode = "combinational";
   readonly name: string | undefined;
   /** All gate ids, in declaration order. */
   readonly gateIds: readonly string[];
@@ -30,6 +29,8 @@ export class CompiledCircuit {
   readonly outputIds: readonly string[];
   /** Gate ids in evaluation order. */
   readonly order: readonly string[];
+  /** A circuit without loops remembers nothing between simulations. */
+  readonly stateIds: readonly string[] = Object.freeze([]);
 
   /** @internal Evaluation plan: one step per gate, in `order`. */
   readonly steps: readonly Step[];
@@ -40,44 +41,35 @@ export class CompiledCircuit {
   constructor(circuit: unknown) {
     assertValidCircuit(circuit); // throws CircuitValidationError listing every issue
     const order = topologicalSort(circuit); // throws CycleError on a feedback loop
-    const { gates, wires } = circuit;
+    const network = buildNetwork(circuit); // every gate made by the gate factory
+    const slotById = new Map(network.gateIds.map((id, slot) => [id, slot]));
 
-    const slotById = new Map(gates.map((gate, slot) => [gate.id, slot]));
-    const slotOf = (id: string): number => {
-      const slot = slotById.get(id);
-      if (slot === undefined) throw new Error(`Internal error: no slot for gate "${id}"`);
-      return slot;
-    };
-
-    // Validation guarantees one wire per used pin and no gaps, so these arrays end up dense.
-    const sources: number[][] = gates.map(() => []);
-    for (const wire of wires) at(sources, slotOf(wire.to))[wire.toPin] = slotOf(wire.from);
-
-    const inputIds = gates.filter((gate) => gate.type === "INPUT").map((gate) => gate.id);
-    const outputSlots = gates.flatMap((gate, slot) => (gate.type === "OUTPUT" ? [slot] : []));
-
-    this.name = circuit.name;
-    this.gateIds = Object.freeze(gates.map((gate) => gate.id));
-    this.inputIds = Object.freeze(inputIds);
-    this.outputIds = Object.freeze(outputSlots.map((slot) => at(gates, slot).id));
+    this.name = network.name;
+    this.gateIds = network.gateIds;
+    this.inputIds = network.inputIds;
+    this.outputIds = network.outputIds;
+    this.outputSlots = network.outputSlots;
     this.order = Object.freeze(order);
-    this.outputSlots = Object.freeze(outputSlots);
-    this.steps = Object.freeze(
-      order.map((id): Step => {
-        const slot = slotOf(id);
-        const gate = at(gates, slot);
-        switch (gate.type) {
-          case "INPUT":
-            return { kind: "input", slot, input: inputIds.indexOf(id) };
-          case "CONST":
-            return { kind: "const", slot, value: gate.value };
-          case "OUTPUT": // an OUTPUT just shows its input, exactly like a buffer
-            return { kind: "logic", slot, evaluate: GATE_LOGIC.BUF, sources: at(sources, slot) };
-          default:
-            return { kind: "logic", slot, evaluate: GATE_LOGIC[gate.type], sources: at(sources, slot) };
-        }
-      }),
-    );
+    this.steps = Object.freeze(order.map((id) => at(network.nodes, slotById.get(id) ?? -1)));
+  }
+
+  /**
+   * One evaluation: every gate once, in dependency order. A combinational circuit has no state,
+   * so `state` may only be empty.
+   *
+   * @throws SimulationInputError listing every problem with `inputs` and `state`
+   */
+  run(inputs: SimulationInputs, state?: SimulationState): CombinationalResult {
+    const { inputValues } = checkArguments(this.inputIds, this.stateIds, inputs, state);
+    const read = runPlan(this, inputValues);
+    // Object.fromEntries defines real own properties, so even a gate id like "__proto__"
+    // becomes an ordinary key instead of touching the object's prototype.
+    return {
+      mode: "combinational",
+      outputs: Object.fromEntries(this.outputSlots.map((slot) => [at(this.gateIds, slot), read(slot)])),
+      signals: Object.fromEntries(this.gateIds.map((id, slot) => [id, read(slot)])),
+      order: this.order,
+    };
   }
 }
 
@@ -90,4 +82,21 @@ export class CompiledCircuit {
  */
 export function compileCircuit(circuit: unknown): CompiledCircuit {
   return new CompiledCircuit(circuit);
+}
+
+/**
+ * @internal Runs every step of the plan for already-checked input values (in `inputIds` order)
+ * and returns a reader for the resulting signal of any gate slot.
+ */
+export function runPlan(compiled: CompiledCircuit, inputValues: readonly Bit[]): (slot: number) => Bit {
+  // One entry per gate. Steps run in topological order, so every read finds a value that
+  // has already been computed. Reading `undefined` would mean the ordering is broken.
+  const signals: (Bit | undefined)[] = new Array(compiled.gateIds.length);
+  const read = (slot: number): Bit => {
+    const value = signals[slot];
+    if (value === undefined) throw new Error(`Internal error: gate "${at(compiled.gateIds, slot)}" read before it was evaluated`);
+    return value;
+  };
+  for (const step of compiled.steps) signals[step.slot] = evaluateNode(step, inputValues, read);
+  return read;
 }

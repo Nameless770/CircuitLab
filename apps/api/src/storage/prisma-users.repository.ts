@@ -2,6 +2,7 @@ import type { UserRecord } from "@circuitlab/api-contract";
 import type { PrismaClient } from "@circuitlab/database";
 import { Injectable } from "@nestjs/common";
 import { UsersRepository, type NewUser, type UserWithPassword } from "../auth/users.repository";
+import { Clock } from "../common/clock";
 import { UUID } from "./prisma-circuits.repository";
 import { PrismaService } from "./prisma.service";
 
@@ -11,7 +12,10 @@ const PUBLIC_COLUMNS = { id: true, email: true, displayName: true, createdAt: tr
 /** The `users` table, through Prisma Client. */
 @Injectable()
 export class PrismaUsersRepository extends UsersRepository {
-  constructor(private readonly database: PrismaService) {
+  constructor(
+    private readonly database: PrismaService,
+    private readonly clock: Clock,
+  ) {
     super();
   }
 
@@ -21,7 +25,8 @@ export class PrismaUsersRepository extends UsersRepository {
 
   async create(user: NewUser): Promise<UserRecord | undefined> {
     try {
-      return await this.prisma.user.create({ data: user, select: PUBLIC_COLUMNS });
+      const now = this.clock.now();
+      return await this.prisma.user.create({ data: { ...user, createdAt: now, updatedAt: now }, select: PUBLIC_COLUMNS });
     } catch (error) {
       // P2002: a unique constraint refused the row. The only one on users is the email address.
       if ((error as { code?: unknown }).code === "P2002") return undefined;
@@ -39,6 +44,6 @@ export class PrismaUsersRepository extends UsersRepository {
   }
 
   async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
-    await this.prisma.user.update({ where: { id }, data: { passwordHash, updatedAt: new Date() } });
+    await this.prisma.user.update({ where: { id }, data: { passwordHash, updatedAt: this.clock.now() } });
   }
 }
