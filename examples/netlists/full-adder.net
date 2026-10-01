@@ -1,0 +1,15 @@
+# Full adder: adds three bits.
+.name "Full adder"
+
+A   = INPUT
+B   = INPUT
+Cin = INPUT "Carry in"
+
+parity   = XOR(A, B, Cin)     # 1 when an odd number of inputs are 1
+ab       = AND(A, B)
+ac       = AND(A, Cin)
+bc       = AND(B, Cin)
+majority = OR(ab, ac, bc)     # 1 when at least two inputs are 1
+
+S    = OUTPUT(parity)    "Sum"
+Cout = OUTPUT(majority)  "Carry out"

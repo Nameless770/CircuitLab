@@ -1,0 +1,32 @@
+{
+  "name": "@circuitlab/runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs CircuitLab simulations on worker threads, off the main event loop",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.3"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@circuitlab/engine": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

@@ -1,0 +1,14 @@
+# Half adder: adds two bits.
+#
+# Each line defines one gate:   name = TYPE(inputs in pin order)  "optional label"
+# Lines starting with "." are directives; "#" starts a comment.
+.name "Half adder"
+
+A = INPUT
+B = INPUT
+
+sum   = XOR(A, B)
+carry = AND(A, B)
+
+S = OUTPUT(sum)    "Sum"
+C = OUTPUT(carry)  "Carry"

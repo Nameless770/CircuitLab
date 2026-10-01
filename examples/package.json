@@ -1,0 +1,23 @@
+{
+  "name": "@circuitlab/examples",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "demo": "node dist/demo.js",
+    "demo:netlist": "node dist/netlist-demo.js",
+    "demo:async": "node dist/async-demo.js",
+    "demo:api": "node dist/api-demo.js",
+    "demo:http": "node dist/http-demo.js"
+  },
+  "dependencies": {
+    "@circuitlab/api": "^0.1.0",
+    "@circuitlab/api-contract": "^0.1.0",
+    "@circuitlab/engine": "^0.1.0",
+    "@circuitlab/netlist": "^0.1.0",
+    "@circuitlab/runner": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

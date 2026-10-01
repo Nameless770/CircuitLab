@@ -1,0 +1,1401 @@
+openapi: 3.1.0
+info:
+  title: CircuitLab API
+  version: 1.0.0
+  summary: Store digital logic circuits, simulate them, and page through their truth tables.
+  description: |
+    Conventions used everywhere in this API:
+
+    - **Versioning.** Every path starts with `/v1`. Additive changes (new endpoints, new optional
+      fields or parameters) stay in v1; a change that could break an existing client means `/v2`.
+    - **Authentication.** Register at `/auth/register` or sign in at `/auth/login` to get an
+      access token, and send it as `Authorization: Bearer <token>`. Access tokens expire after 15
+      minutes; trade the refresh token for a new pair at `/auth/refresh` (each refresh token works
+      once). Public circuits can be read without a token.
+    - **Access.** A circuit is private to its owner until the owner shares it (as `viewer` or
+      `editor`) or makes it public. A circuit you may not see answers 404, not 403, so private
+      circuits can't be discovered by guessing ids. 403 means you can see it but may not do this.
+    - **Errors.** Every error is an RFC 9457 problem document (`application/problem+json`) with a
+      stable `code`. Validation errors list every problem at once in `issues`, each located by
+      `pointer` (an RFC 6901 JSON Pointer into the JSON body), `parameter` (a query parameter),
+      or `line`/`column` (a netlist).
+    - **400 or 422.** 400 means the request could not be read: an unparseable body or a bad query
+      parameter. 422 means it was read fine, but what it describes is invalid.
+    - **Pagination.** Circuits are paged with opaque cursors, which stay correct while circuits are
+      added and deleted. Truth-table rows are paged by row number (`offset`, `limit`), because a row
+      number is a permanent address inside a table.
+    - **Concurrency.** Circuit responses carry an `ETag` holding the circuit's version. Send it back
+      in `If-Match` when changing or deleting a circuit; if someone changed it in the meantime you get
+      412 instead of silently overwriting their work.
+    - **Overload.** Simulations run on a fixed pool of worker threads. When every worker is busy and
+      the waiting line is full, the API answers 503 with `Retry-After` rather than queueing forever.
+    - **Limits.** A circuit has at most 10,000 gates and 50,000 wires; request bodies are at most 5 MB.
+
+servers:
+  - url: http://localhost:3000/v1
+    description: Local development
+
+# A token is optional unless an operation says otherwise: without one, you see public circuits.
+# Operations that need a signed-in user list only bearerAuth; the account endpoints need none.
+security:
+  - bearerAuth: []
+  - {}
+
+tags:
+  - name: Circuits
+    description: Create, read, update, and delete circuits.
+  - name: Simulation
+    description: Evaluate a stored circuit.
+  - name: Sharing
+    description: Give other people access to your circuits.
+  - name: Accounts
+    description: Register, sign in, refresh tokens, sign out.
+
+paths:
+  /circuits:
+    get:
+      operationId: listCircuits
+      tags: [Circuits]
+      summary: List circuits
+      description: One page of circuit summaries. Fetch a single circuit to get its gates and wires.
+      parameters:
+        - $ref: "#/components/parameters/ListScope"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/CircuitSort"
+        - $ref: "#/components/parameters/NameSearch"
+      responses:
+        "200":
+          description: One page of circuits.
+          headers:
+            Link: { $ref: "#/components/headers/Link" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CircuitPage" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+    post:
+      operationId: createCircuit
+      tags: [Circuits]
+      summary: Create a circuit
+      security:
+        - bearerAuth: []
+      description: |
+        The new circuit belongs to you and is private. Send it as JSON, or as a netlist file (`text/vnd.circuitlab.netlist`, optionally
+        gzip-compressed with `Content-Encoding: gzip`). A netlist's name is the `name` query
+        parameter if given, else its `.name` line; `name` and `description` are only accepted with
+        netlist bodies.
+
+        Circuits with a feedback loop (such as a latch) are valid and are stored. They cannot be
+        simulated combinationally; `summary.feedbackLoop` shows the loop.
+
+        With `dryRun=true` nothing is stored: the answer is 200 with a validation report, or the
+        same 422 a real request would get.
+      parameters:
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/NetlistName"
+        - $ref: "#/components/parameters/NetlistDescription"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CircuitInput" }
+          text/vnd.circuitlab.netlist:
+            schema: { $ref: "#/components/schemas/NetlistText" }
+      responses:
+        "201":
+          description: Created.
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Circuit" }
+        "200":
+          description: Dry run passed; nothing was stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationReport" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/ContentTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidContent" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+    get:
+      operationId: getCircuit
+      tags: [Circuits]
+      summary: Get a circuit
+      description: |
+        Your circuits, circuits shared with you, and public circuits. JSON by default; send
+        `Accept: text/vnd.circuitlab.netlist` to download it as a netlist.
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The circuit.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Circuit" }
+            text/vnd.circuitlab.netlist:
+              schema: { $ref: "#/components/schemas/NetlistText" }
+        "304": { $ref: "#/components/responses/NotModified" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+    put:
+      operationId: replaceCircuit
+      tags: [Circuits]
+      summary: Replace a circuit
+      security:
+        - bearerAuth: []
+      description: |
+        Replaces the name, description, gates, and wires; the version goes up by one. Accepts the same
+        bodies as creating a circuit, including netlists. For the owner and editors.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/NetlistName"
+        - $ref: "#/components/parameters/NetlistDescription"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CircuitInput" }
+          text/vnd.circuitlab.netlist:
+            schema: { $ref: "#/components/schemas/NetlistText" }
+      responses:
+        "200":
+          description: Replaced.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Circuit" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "413": { $ref: "#/components/responses/ContentTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidContent" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+    patch:
+      operationId: updateCircuitMetadata
+      tags: [Circuits]
+      summary: Rename a circuit, change its description, or change who can see it
+      security:
+        - bearerAuth: []
+      description: |
+        A JSON Merge Patch (RFC 7386). Setting `description` to null removes it. The owner and
+        editors may change the name and description; only the owner may change `visibility`.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: "#/components/schemas/CircuitMetadataPatch" }
+          application/json:
+            schema: { $ref: "#/components/schemas/CircuitMetadataPatch" }
+      responses:
+        "200":
+          description: Updated.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Circuit" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidContent" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+    delete:
+      operationId: deleteCircuit
+      tags: [Circuits]
+      summary: Delete a circuit
+      description: For the owner only.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/simulate:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+    post:
+      operationId: simulateCircuit
+      tags: [Simulation]
+      summary: Simulate a circuit once
+      description: |
+        Evaluates the circuit for one set of input values. Returns the OUTPUT values; add
+        `include=signals` to also get every gate's signal and the evaluation order.
+      parameters:
+        - name: include
+          in: query
+          description: Extra data to return.
+          schema:
+            type: string
+            enum: [signals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SimulateRequest" }
+      responses:
+        "200":
+          description: The simulation result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimulationResponse" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidContent" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/truth-table:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+    get:
+      operationId: getTruthTable
+      tags: [Simulation]
+      summary: Page through a circuit's truth table
+      description: |
+        Row `n` holds the input values given by `n` in binary, first input as the most significant
+        bit. The response format follows `Accept`:
+
+        - `application/json` (default): one page of at most 4,096 rows, with links to other pages.
+        - `application/x-ndjson` or `text/csv`: a stream of up to 1,048,576 rows, for downloads.
+
+        To page through a table while being sure it does not change underneath you, pass the
+        `version` from the first page to the following ones (the `next` link already does). If the
+        circuit has changed since, you get 409 and should start again.
+      parameters:
+        - $ref: "#/components/parameters/RowOffset"
+        - $ref: "#/components/parameters/RowLimit"
+        - $ref: "#/components/parameters/ExpectedVersion"
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The rows.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TruthTablePage" }
+            application/x-ndjson:
+              schema:
+                description: One of these per line.
+                $ref: "#/components/schemas/TruthTableStreamRow"
+            text/csv:
+              schema:
+                type: string
+                description: A header line `#,<input ids>,<output ids>`, then one line per row.
+        "304": { $ref: "#/components/responses/NotModified" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/VersionConflict" }
+        "422": { $ref: "#/components/responses/InvalidContent" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/runs:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+    get:
+      operationId: listRuns
+      tags: [Simulation]
+      summary: Recent simulations of a circuit
+      security:
+        - bearerAuth: []
+      description: |
+        Newest first. Every simulation the API runs is recorded, whether it succeeded or failed
+        (an invalid input, a feedback loop), together with the circuit version it ran on. Requests
+        turned away before running (503) are not runs. Truth-table pages are not recorded; background
+        truth-table jobs will be (phase 10).
+
+        The owner sees everyone's runs; anyone else who can see the circuit sees only their own.
+      parameters:
+        - name: limit
+          in: query
+          description: How many runs.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: The most recent runs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimulationRunList" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/shares:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+    get:
+      operationId: listShares
+      tags: [Sharing]
+      summary: Who a circuit is shared with
+      description: For the owner only.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Everyone the circuit is shared with, oldest share first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShareList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+    post:
+      operationId: shareCircuit
+      tags: [Sharing]
+      summary: Share a circuit, or change someone's role
+      description: |
+        For the owner only. The person needs an account; sharing again with the same person changes
+        their role. A viewer may read and simulate the circuit; an editor may also change its name,
+        description, gates, and wires. Only the owner may delete it, share it, or make it public.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ShareRequest" }
+      responses:
+        "201":
+          description: Shared.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Share" }
+        "200":
+          description: Already shared with this person; their role is now the one given.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Share" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidFields" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/shares/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+      - $ref: "#/components/parameters/UserId"
+    delete:
+      operationId: unshareCircuit
+      tags: [Sharing]
+      summary: Stop sharing a circuit with someone
+      description: The owner may remove anyone's access; anyone may remove their own.
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: They no longer have access through this share.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [Accounts]
+      summary: Create an account
+      description: Creates the account and signs it in, like `/auth/login`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: The account, signed in.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "409":
+          description: An account with this email address already exists (`email-taken`).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidFields" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Accounts]
+      summary: Sign in
+      description: |
+        Starts a session: an access token for requests, and a refresh token to get new ones. After 5
+        failed attempts for one account from one address, further attempts get 429 for 15 minutes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignInRequest" }
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidFields" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [Accounts]
+      summary: Trade a refresh token for new tokens
+      description: |
+        Returns a new access token and a new refresh token; the old refresh token stops working. If
+        an old refresh token is used again, someone else may have a copy, so the whole session ends
+        and both parties have to sign in again.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200":
+          description: New tokens for the same session.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidFields" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Accounts]
+      summary: Sign out
+      description: |
+        Ends the session the refresh token belongs to. Access tokens already issued stay valid until
+        they expire (at most 15 minutes), so a client should also discard its copy. Always 204, even
+        for a token that was already invalid: the outcome is the same.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "204":
+          description: Signed out.
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidFields" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /users/me:
+    get:
+      operationId: getCurrentUser
+      tags: [Accounts]
+      summary: The signed-in account
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Your account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: An access token from `/auth/login`, `/auth/register`, or `/auth/refresh`. Valid for 15 minutes.
+
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: An account's id, as in a share's `user.id`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+
+    ListScope:
+      name: scope
+      in: query
+      description: |
+        Which circuits: `owned` (yours), `shared` (shared with you by others), or `public`
+        (everyone's public circuits). Default: `owned` when signed in, `public` otherwise. `owned`
+        and `shared` need a token.
+      schema:
+        type: string
+        enum: [owned, shared, public]
+
+    CircuitId:
+      name: circuitId
+      in: path
+      required: true
+      description: The circuit's id, as returned when it was created. Treat it as opaque.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+
+    PageLimit:
+      name: limit
+      in: query
+      description: Circuits per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    Cursor:
+      name: cursor
+      in: query
+      description: Where to continue, taken from a previous page's `page.nextCursor`. Opaque.
+      schema:
+        title: a cursor copied from a previous page's page.nextCursor
+        type: string
+        maxLength: 512
+        pattern: "^[A-Za-z0-9_-]+$"
+
+    CircuitSort:
+      name: sort
+      in: query
+      description: Order of the list. `-` means newest first. Ties are broken by id.
+      schema:
+        type: string
+        enum: [-createdAt, -updatedAt, name]
+        default: -createdAt
+
+    NameSearch:
+      name: q
+      in: query
+      description: Only circuits whose name contains this text, ignoring case.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+
+    DryRun:
+      name: dryRun
+      in: query
+      description: Only validate; store nothing.
+      schema:
+        type: boolean
+        default: false
+
+    NetlistName:
+      name: name
+      in: query
+      description: Name for a netlist body that has no `.name` line. Not accepted with JSON bodies.
+      schema: { $ref: "#/components/schemas/CircuitName" }
+
+    NetlistDescription:
+      name: description
+      in: query
+      description: Description for a netlist body. Not accepted with JSON bodies.
+      schema: { $ref: "#/components/schemas/CircuitDescription" }
+
+    RowOffset:
+      name: offset
+      in: query
+      description: Number of the first row to return.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 9007199254740991
+        default: 0
+
+    RowLimit:
+      name: limit
+      in: query
+      description: |
+        Most rows to return. JSON pages: 1 to 4,096, default 256. Streams (NDJSON, CSV): up to
+        1,048,576, default "to the end of the table", which must then be at most that many rows.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1048576
+
+    ExpectedVersion:
+      name: version
+      in: query
+      description: Fail with 409 unless the circuit is still at this version.
+      schema:
+        type: integer
+        minimum: 1
+
+    IfMatch:
+      name: If-Match
+      in: header
+      description: The circuit's ETag as last seen. The request fails with 412 if it has changed since.
+      schema:
+        type: string
+
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      description: An ETag already held. If it is still current, the answer is 304 with no body.
+      schema:
+        type: string
+
+  headers:
+    ETag:
+      description: Identifies this version of the representation; it changes whenever the circuit does.
+      schema:
+        type: string
+        examples: ['"7"']
+    Location:
+      description: URL of the new circuit.
+      schema:
+        type: string
+        examples: [/v1/circuits/0199a3c4-5e6f-7a8b-9c0d-1e2f3a4b5c6d]
+    Link:
+      description: RFC 8288 links to neighbouring pages, e.g. `<...>; rel="next"`.
+      schema:
+        type: string
+    RetryAfter:
+      description: Seconds to wait before trying again.
+      schema:
+        type: integer
+        minimum: 1
+    WWWAuthenticate:
+      description: How to authenticate (RFC 6750), e.g. `Bearer realm="circuitlab", error="invalid_token"`.
+      schema:
+        type: string
+    NoStore:
+      description: "`no-store`, so no cache keeps a copy of the tokens."
+      schema:
+        type: string
+        const: no-store
+
+  responses:
+    NotModified:
+      description: The copy you hold (your `If-None-Match` ETag) is still current.
+    InvalidRequest:
+      description: The request could not be read (`invalid-request`, `malformed-body`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: |
+        Sign in first (`unauthenticated`), the token can't be used (`invalid-token`: refresh it
+        or sign in again), or a sign-in failed (`invalid-credentials`).
+      headers:
+        WWW-Authenticate: { $ref: "#/components/headers/WWWAuthenticate" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: You can see this circuit but may not do this to it (`forbidden`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    InvalidFields:
+      description: The body was read, but a field is invalid (`invalid-fields`); see `issues`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: Too many failed attempts (`too-many-requests`); see `Retry-After`.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: |
+        No circuit has this id, or you may not see it (`not-found`). The two are deliberately
+        indistinguishable.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotAcceptable:
+      description: None of the formats in `Accept` is available here (`not-acceptable`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    VersionConflict:
+      description: The circuit changed since the first page was fetched (`version-conflict`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PreconditionFailed:
+      description: The circuit changed since you last read it (`precondition-failed`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ContentTooLarge:
+      description: The body is over 5 MB (`content-too-large`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedMediaType:
+      description: The body's `Content-Type` is not accepted here (`unsupported-media-type`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    InvalidContent:
+      description: |
+        The request was read, but what it describes is invalid: `invalid-circuit`, `invalid-netlist`,
+        `invalid-inputs`, `feedback-loop`, `too-many-inputs`, or `computation-too-large`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ServiceUnavailable:
+      description: |
+        Try again later: `server-busy` (all simulation workers busy), `server-unavailable` (the
+        server is shutting down, or the database can't be reached), or `simulation-timeout`. See
+        `Retry-After`. Any operation can answer this: every one of them uses the database.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Bit:
+      type: integer
+      enum: [0, 1]
+
+    GateId:
+      title: a gate name (letters, digits, and _ . $ [ ]; not starting with "."; at most 64 characters)
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: "^[A-Za-z0-9_][A-Za-z0-9_.$\\[\\]]*$"
+      examples: [A, carry, "sum[3]"]
+
+    Gate:
+      description: |
+        One gate, told apart by `type`, exactly like the engine's TypeScript union. INPUT and CONST
+        have no input pins; OUTPUT, BUF, and NOT have one; the others have 2 to 64. Only CONST
+        gates have a `value`.
+      type: object
+      oneOf:
+        - $ref: "#/components/schemas/InputGate"
+        - $ref: "#/components/schemas/OutputGate"
+        - $ref: "#/components/schemas/ConstGate"
+        - $ref: "#/components/schemas/LogicGate"
+      discriminator:
+        propertyName: type
+        mapping:
+          INPUT: "#/components/schemas/InputGate"
+          OUTPUT: "#/components/schemas/OutputGate"
+          CONST: "#/components/schemas/ConstGate"
+          BUF: "#/components/schemas/LogicGate"
+          NOT: "#/components/schemas/LogicGate"
+          AND: "#/components/schemas/LogicGate"
+          OR: "#/components/schemas/LogicGate"
+          NAND: "#/components/schemas/LogicGate"
+          NOR: "#/components/schemas/LogicGate"
+          XOR: "#/components/schemas/LogicGate"
+          XNOR: "#/components/schemas/LogicGate"
+
+    InputGate:
+      description: External input; its value is given when simulating.
+      type: object
+      required: [id, type]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/GateId" }
+        type: { type: string, const: INPUT }
+        label: { $ref: "#/components/schemas/GateLabel" }
+
+    OutputGate:
+      description: External output; shows the signal on its single input pin.
+      type: object
+      required: [id, type]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/GateId" }
+        type: { type: string, const: OUTPUT }
+        label: { $ref: "#/components/schemas/GateLabel" }
+
+    ConstGate:
+      description: A fixed logic level.
+      type: object
+      required: [id, type, value]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/GateId" }
+        type: { type: string, const: CONST }
+        label: { $ref: "#/components/schemas/GateLabel" }
+        value: { $ref: "#/components/schemas/Bit" }
+
+    LogicGate:
+      description: A gate computed from its inputs.
+      type: object
+      required: [id, type]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/GateId" }
+        type:
+          type: string
+          enum: [BUF, NOT, AND, OR, NAND, NOR, XOR, XNOR]
+        label: { $ref: "#/components/schemas/GateLabel" }
+
+    GateLabel:
+      description: Display name for people; the engine never reads it.
+      type: string
+      maxLength: 200
+
+    Wire:
+      type: object
+      description: Connects the output of gate `from` to input pin `toPin` (numbered from 0) of gate `to`.
+      required: [from, to, toPin]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/GateId" }
+        from: { $ref: "#/components/schemas/GateId" }
+        to: { $ref: "#/components/schemas/GateId" }
+        toPin:
+          type: integer
+          minimum: 0
+          maximum: 63
+
+    CircuitName:
+      title: a name that is not blank, at most 200 characters
+      type: string
+      minLength: 1
+      maxLength: 200
+      pattern: "\\S"
+
+    CircuitDescription:
+      type: string
+      maxLength: 2000
+
+    NetlistText:
+      type: string
+      description: A CircuitLab netlist, one gate per line, e.g. `sum = XOR(A, B)`.
+      examples:
+        - ".name \"Half adder\"\nA = INPUT\nB = INPUT\nsum = XOR(A, B)\ncarry = AND(A, B)\nS = OUTPUT(sum)\nC = OUTPUT(carry)\n"
+
+    CircuitInput:
+      type: object
+      description: A circuit as sent by a client.
+      required: [name, gates, wires]
+      additionalProperties: false
+      properties:
+        name: { $ref: "#/components/schemas/CircuitName" }
+        description: { $ref: "#/components/schemas/CircuitDescription" }
+        gates:
+          type: array
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/Gate" }
+        wires:
+          type: array
+          maxItems: 50000
+          items: { $ref: "#/components/schemas/Wire" }
+      examples:
+        - name: Half adder
+          gates:
+            - { id: A, type: INPUT }
+            - { id: B, type: INPUT }
+            - { id: sum, type: XOR }
+            - { id: carry, type: AND }
+            - { id: S, type: OUTPUT, label: Sum }
+            - { id: C, type: OUTPUT, label: Carry }
+          wires:
+            - { from: A, to: sum, toPin: 0 }
+            - { from: B, to: sum, toPin: 1 }
+            - { from: A, to: carry, toPin: 0 }
+            - { from: B, to: carry, toPin: 1 }
+            - { from: sum, to: S, toPin: 0 }
+            - { from: carry, to: C, toPin: 0 }
+
+    CircuitMetadataPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: { $ref: "#/components/schemas/CircuitName" }
+        description:
+          description: A new description, or null to remove it.
+          type: [string, "null"]
+          maxLength: 2000
+        visibility: { $ref: "#/components/schemas/Visibility" }
+
+    Visibility:
+      description: |
+        Who may see the circuit besides its owner and the people it is shared with: nobody
+        (`private`, the default) or everyone (`public`, read-only).
+      type: string
+      enum: [private, public]
+
+    UserSummary:
+      type: object
+      required: [id, displayName]
+      properties:
+        id: { type: string }
+        displayName: { $ref: "#/components/schemas/DisplayName" }
+
+    CircuitSummary:
+      type: object
+      required: [gates, wires, inputs, outputs, feedbackLoop]
+      properties:
+        gates: { type: integer, minimum: 0 }
+        wires: { type: integer, minimum: 0 }
+        inputs:
+          description: INPUT gate ids, in declaration order; the keys a simulation needs.
+          type: array
+          items: { $ref: "#/components/schemas/GateId" }
+        outputs:
+          description: OUTPUT gate ids, in declaration order.
+          type: array
+          items: { $ref: "#/components/schemas/GateId" }
+        feedbackLoop:
+          description: A loop of gates (first id repeated at the end), or null if there is none.
+          type: [array, "null"]
+          items: { $ref: "#/components/schemas/GateId" }
+
+    CircuitListItem:
+      type: object
+      required: [id, name, owner, visibility, version, createdAt, updatedAt, summary]
+      properties:
+        id: { type: string }
+        name: { $ref: "#/components/schemas/CircuitName" }
+        description: { $ref: "#/components/schemas/CircuitDescription" }
+        owner: { $ref: "#/components/schemas/UserSummary" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        version:
+          description: Starts at 1 and goes up by one with every change.
+          type: integer
+          minimum: 1
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        summary: { $ref: "#/components/schemas/CircuitSummary" }
+
+    Circuit:
+      allOf:
+        - { $ref: "#/components/schemas/CircuitListItem" }
+        - type: object
+          required: [gates, wires]
+          properties:
+            gates:
+              type: array
+              items: { $ref: "#/components/schemas/Gate" }
+            wires:
+              type: array
+              items: { $ref: "#/components/schemas/Wire" }
+
+    CircuitPage:
+      type: object
+      required: [items, page, links]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CircuitListItem" }
+        page:
+          type: object
+          required: [limit, nextCursor]
+          properties:
+            limit: { type: integer }
+            nextCursor:
+              description: Pass as `cursor` to get the next page; null on the last page.
+              type: [string, "null"]
+        links:
+          type: object
+          required: [self, next]
+          properties:
+            self: { type: string }
+            next: { type: [string, "null"] }
+
+    ValidationReport:
+      type: object
+      required: [valid, summary]
+      properties:
+        valid: { const: true }
+        summary: { $ref: "#/components/schemas/CircuitSummary" }
+
+    SimulateRequest:
+      type: object
+      required: [inputs]
+      additionalProperties: false
+      properties:
+        inputs:
+          description: One value per INPUT gate, keyed by gate id (see `summary.inputs`).
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Bit" }
+      examples:
+        - inputs: { A: 1, B: 0 }
+
+    SimulationResponse:
+      type: object
+      required: [circuitId, circuitVersion, outputs]
+      properties:
+        circuitId: { type: string }
+        circuitVersion: { type: integer }
+        outputs:
+          description: The value of every OUTPUT gate, keyed by gate id.
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Bit" }
+        signals:
+          description: With `include=signals`, the output signal of every gate.
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Bit" }
+        order:
+          description: With `include=signals`, the gate ids in evaluation order.
+          type: array
+          items: { $ref: "#/components/schemas/GateId" }
+
+    SimulationRun:
+      type: object
+      description: One recorded simulation.
+      required: [id, circuitVersion, kind, status, createdAt]
+      properties:
+        id: { type: string }
+        circuitVersion:
+          description: The version of the circuit that was simulated.
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum: [simulate, truth_table]
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        inputs:
+          description: The input values, keyed by INPUT gate id (only the circuit's own inputs are kept).
+          type: object
+          additionalProperties: true
+        outputs:
+          description: When it succeeded, the value of every OUTPUT gate.
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Bit" }
+        errorCode:
+          description: When it failed, the problem code the API answered with, e.g. `invalid-inputs`.
+          type: string
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+
+    SimulationRunList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SimulationRun" }
+
+    TruthTableRow:
+      type: object
+      required: [index, inputs, outputs]
+      properties:
+        index: { type: integer, minimum: 0 }
+        inputs:
+          description: Input values, in the order of the page's `inputs`.
+          type: array
+          items: { $ref: "#/components/schemas/Bit" }
+        outputs:
+          description: Output values, in the order of the page's `outputs`.
+          type: array
+          items: { $ref: "#/components/schemas/Bit" }
+
+    TruthTableStreamRow:
+      description: One NDJSON line. Values are keyed by gate id, so every line stands on its own.
+      type: object
+      required: [index, inputs, outputs]
+      properties:
+        index: { type: integer, minimum: 0 }
+        inputs:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Bit" }
+        outputs:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Bit" }
+
+    TruthTablePage:
+      type: object
+      required: [circuitId, circuitVersion, inputs, outputs, totalRows, offset, limit, rows, links]
+      properties:
+        circuitId: { type: string }
+        circuitVersion: { type: integer }
+        inputs:
+          type: array
+          items: { $ref: "#/components/schemas/GateId" }
+        outputs:
+          type: array
+          items: { $ref: "#/components/schemas/GateId" }
+        totalRows:
+          description: Rows in the whole table, 2 to the power of the number of inputs.
+          type: integer
+        offset: { type: integer }
+        limit: { type: integer }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/TruthTableRow" }
+        links:
+          type: object
+          required: [self, first, prev, next, last]
+          properties:
+            self: { type: string }
+            first: { type: string }
+            prev: { type: [string, "null"] }
+            next: { type: [string, "null"] }
+            last: { type: string }
+
+    Email:
+      title: an email address such as ada@example.com (at most 254 characters)
+      type: string
+      maxLength: 254
+      pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+      examples: [ada@example.com]
+
+    Password:
+      title: a password of 15 to 256 characters
+      description: |
+        15 to 256 characters, any characters at all; a passphrase of a few words is ideal. No rules
+        about digits or symbols (NIST SP 800-63B).
+      type: string
+      minLength: 15
+      maxLength: 256
+
+    DisplayName:
+      title: a name that is not blank, at most 100 characters
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: "\\S"
+
+    RegisterRequest:
+      type: object
+      required: [email, password, displayName]
+      additionalProperties: false
+      properties:
+        email: { $ref: "#/components/schemas/Email" }
+        password: { $ref: "#/components/schemas/Password" }
+        displayName: { $ref: "#/components/schemas/DisplayName" }
+      examples:
+        - { email: ada@example.com, password: correct horse battery staple, displayName: Ada }
+
+    SignInRequest:
+      description: The password rules are not checked here, only when a password is chosen.
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 1
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      additionalProperties: false
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+          maxLength: 512
+
+    User:
+      type: object
+      description: Your account.
+      required: [id, email, displayName, createdAt]
+      properties:
+        id: { type: string }
+        email: { $ref: "#/components/schemas/Email" }
+        displayName: { $ref: "#/components/schemas/DisplayName" }
+        createdAt: { type: string, format: date-time }
+
+    AuthSession:
+      type: object
+      required: [tokenType, accessToken, expiresIn, refreshToken, user]
+      properties:
+        tokenType: { const: Bearer }
+        accessToken:
+          description: "A JWT. Send it as `Authorization: Bearer <accessToken>`."
+          type: string
+        expiresIn:
+          description: Seconds until the access token expires.
+          type: integer
+          minimum: 1
+        refreshToken:
+          description: |
+            Opaque. Keep it secret; trade it at `/auth/refresh` for new tokens (it works once). It
+            expires after 30 days without use.
+          type: string
+        user: { $ref: "#/components/schemas/User" }
+
+    ShareRole:
+      description: "`viewer` may read and simulate; `editor` may also change the circuit."
+      type: string
+      enum: [viewer, editor]
+
+    ShareRequest:
+      type: object
+      required: [email, role]
+      additionalProperties: false
+      properties:
+        email:
+          description: The email address of the person's account.
+          type: string
+          minLength: 1
+          maxLength: 254
+        role: { $ref: "#/components/schemas/ShareRole" }
+      examples:
+        - { email: bob@example.com, role: viewer }
+
+    Share:
+      type: object
+      required: [user, role, createdAt]
+      properties:
+        user:
+          allOf:
+            - { $ref: "#/components/schemas/UserSummary" }
+            - type: object
+              required: [email]
+              properties:
+                email: { type: string }
+        role: { $ref: "#/components/schemas/ShareRole" }
+        createdAt:
+          description: When it was first shared with this person.
+          type: string
+          format: date-time
+
+    ShareList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Share" }
+
+    ProblemIssue:
+      type: object
+      description: One problem found while validating. Exactly one of the location fields is usually set.
+      required: [code, message]
+      properties:
+        code:
+          description: Machine-readable, e.g. `UNKNOWN_FIELD`, `UNCONNECTED_PIN`, `MISSING_INPUT`.
+          type: string
+        message: { type: string }
+        pointer:
+          description: RFC 6901 JSON Pointer into the request body, e.g. `/gates/3/type`.
+          type: string
+        parameter:
+          description: The query parameter at fault.
+          type: string
+        line: { type: integer, minimum: 1 }
+        column: { type: integer, minimum: 1 }
+
+    Problem:
+      type: object
+      description: An RFC 9457 problem document.
+      required: [type, title, status, code]
+      properties:
+        type:
+          description: Identifies the kind of problem; a relative URL such as `/problems/invalid-circuit`.
+          type: string
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance:
+          description: The request path that failed.
+          type: string
+        code:
+          description: The last segment of `type`, for easy matching in code.
+          type: string
+          enum:
+            - invalid-request
+            - malformed-body
+            - unauthenticated
+            - invalid-token
+            - invalid-credentials
+            - forbidden
+            - not-found
+            - not-acceptable
+            - email-taken
+            - version-conflict
+            - precondition-failed
+            - content-too-large
+            - unsupported-media-type
+            - invalid-circuit
+            - invalid-netlist
+            - invalid-inputs
+            - feedback-loop
+            - too-many-inputs
+            - computation-too-large
+            - invalid-fields
+            - too-many-requests
+            - internal-error
+            - server-busy
+            - server-unavailable
+            - simulation-timeout
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/ProblemIssue" }
+        cycle:
+          description: For `feedback-loop`, the gates around the loop.
+          type: array
+          items: { $ref: "#/components/schemas/GateId" }

@@ -1,0 +1,36 @@
+{
+  "name": "circuitlab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Digital logic circuit simulator",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "examples"
+  ],
+  "scripts": {
+    "build": "npm run generate -w @circuitlab/database && tsc -b",
+    "test": "npm run build && tsc -p tsconfig.test.json && vitest run",
+    "test:coverage": "npm run build && vitest run --coverage",
+    "test:watch": "vitest",
+    "clean": "tsc -b --clean",
+    "demo": "npm run build && node examples/dist/demo.js",
+    "demo:netlist": "npm run build && node examples/dist/netlist-demo.js",
+    "demo:async": "npm run build && node examples/dist/async-demo.js",
+    "demo:api": "npm run build && node examples/dist/api-demo.js",
+    "lint:api": "npm run lint:spec -w @circuitlab/api-contract",
+    "start:api": "npm run build && node --env-file-if-exists=.env apps/api/dist/main.js",
+    "demo:http": "npm run build && node examples/dist/http-demo.js",
+    "demo:auth": "npm run build && node examples/dist/auth-demo.js",
+    "db:check": "npm run build && node packages/database/dist/check-schema.js",
+    "db:start": "npm run build && npm run start -w @circuitlab/database",
+    "db:migrate": "npm run migrate -w @circuitlab/database",
+    "db:status": "npm run migrate:status -w @circuitlab/database",
+    "db:studio": "npm run studio -w @circuitlab/database"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "~5.0.3",
+    "typescript": "~6.0.3",
+    "vitest": "~5.0.3"
+  }
+}

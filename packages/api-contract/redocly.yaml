@@ -1,0 +1,8 @@
+extends:
+  - recommended
+
+rules:
+  # The project's license is its owner's decision; it is added to the spec once chosen.
+  info-license: off
+  # The only server so far is the local development one; the deployed URL comes in phase 13.
+  no-server-example.com: off

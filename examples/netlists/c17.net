@@ -1,0 +1,23 @@
+# ISCAS-85 benchmark c17, the smallest circuit of the standard ISCAS-85 test set,
+# translated from its .bench form. Inputs keep their benchmark names (N1, N2, ...),
+# internal gates are g10, g11, ..., and each primary output gets an OUTPUT gate.
+#
+# The outputs come first, before the gates that drive them: a name can be used
+# before the line that defines it.
+.name "ISCAS-85 c17"
+
+N22 = OUTPUT(g22)
+N23 = OUTPUT(g23)
+
+N1 = INPUT
+N2 = INPUT
+N3 = INPUT
+N6 = INPUT
+N7 = INPUT
+
+g10 = NAND(N1, N3)
+g11 = NAND(N3, N6)
+g16 = NAND(N2, g11)
+g19 = NAND(g11, N7)
+g22 = NAND(g10, g16)
+g23 = NAND(g16, g19)

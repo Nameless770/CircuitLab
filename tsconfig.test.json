@@ -1,0 +1,17 @@
+{
+  // Type-checks the tests, which Vitest runs without checking types (it only strips them).
+  // `npm test` runs this first. Tests import the packages by name, so they are checked against
+  // the built declarations, like any other user of the packages.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"]
+  },
+  "include": ["packages/*/test", "apps/*/test", "vitest.config.mts"]
+}

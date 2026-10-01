@@ -1,0 +1,42 @@
+{
+  "name": "@circuitlab/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The CircuitLab REST API, a NestJS app serving the contract in @circuitlab/api-contract",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@circuitlab/api-contract": "^0.1.0",
+    "@circuitlab/database": "^0.1.0",
+    "@circuitlab/engine": "^0.1.0",
+    "@circuitlab/netlist": "^0.1.0",
+    "@circuitlab/runner": "^0.1.0",
+    "@nestjs/common": "^12.1.2",
+    "@nestjs/core": "^12.1.2",
+    "@nestjs/platform-express": "^12.1.2",
+    "argon2": "^0.45.1",
+    "express": "^5.2.1",
+    "jose": "^6.2.12",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0"
+  }
+}

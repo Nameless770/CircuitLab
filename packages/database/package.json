@@ -1,0 +1,49 @@
+{
+  "name": "@circuitlab/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CircuitLab's PostgreSQL schema and migrations, and a ready-made Prisma Client",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local-postgres.d.ts",
+      "default": "./dist/local-postgres.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "prisma",
+    "prisma.config.ts",
+    "queries.sql"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:status": "prisma migrate status",
+    "start": "node dist/dev-server.js",
+    "studio": "prisma studio",
+    "check": "node dist/check-schema.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0"
+  },
+  "devDependencies": {
+    "@circuitlab/engine": "^0.1.0",
+    "@circuitlab/netlist": "^0.1.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
+    "@types/node": "^24.0.0",
+    "prisma": "7.10.0"
+  }
+}

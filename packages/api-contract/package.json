@@ -1,0 +1,39 @@
+{
+  "name": "@circuitlab/api-contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The CircuitLab REST API contract (OpenAPI) and the framework-free code that enforces it",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./openapi.yaml": "./openapi.yaml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "openapi.yaml"
+  ],
+  "engines": {
+    "node": ">=20.3"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "lint:spec": "npx --yes @redocly/cli@2.57.0 lint openapi.yaml"
+  },
+  "dependencies": {
+    "@circuitlab/engine": "^0.1.0",
+    "@circuitlab/netlist": "^0.1.0",
+    "@circuitlab/runner": "^0.1.0",
+    "ajv": "^8.20.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

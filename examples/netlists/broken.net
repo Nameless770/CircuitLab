@@ -1,0 +1,15 @@
+# Deliberately broken: each line marked "<--" has a mistake the importer should report.
+.name "Broken on purpose"
+.author "me"                     # <-- unknown directive
+
+A = INPUT
+B = INPUT
+A = INPUT                        # <-- A is already defined
+one  = CONST(2)                  # <-- a CONST must be 0 or 1
+maj  = MAJORITY(A, B)            # <-- unknown gate type
+inv  = NOT(A, B)                 # <-- NOT takes exactly one input
+both = AND(A, ghost)             # <-- "ghost" is never defined
+Y = OUTPUT(both)
+Z = OUTPUT(Y)                    # <-- an OUTPUT can't drive anything
+w = AND(A B)                     # <-- missing comma
+note = BUF(A) "unterminated      # <-- missing closing quote

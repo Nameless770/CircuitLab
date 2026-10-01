@@ -1,0 +1,192 @@
+// The database as Prisma Client sees it. The tables themselves are created by the SQL migrations
+// in ./migrations, which also hold what this language can't express: CHECK constraints, the
+// partial indexes, and collations. `npm run db:check` verifies that this file and the migrations
+// describe the same tables (prisma migrate diff reports no difference).
+//
+// Model and field names are TypeScript-style; @map/@@map give the snake_case SQL names.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GateType {
+  INPUT
+  OUTPUT
+  CONST
+  BUF
+  NOT
+  AND
+  OR
+  NAND
+  NOR
+  XOR
+  XNOR
+
+  @@map("gate_type")
+}
+
+enum RunKind {
+  simulate
+  truth_table
+
+  @@map("run_kind")
+}
+
+enum CircuitVisibility {
+  private
+  public
+
+  @@map("circuit_visibility")
+}
+
+enum ShareRole {
+  viewer
+  editor
+
+  @@map("share_role")
+}
+
+enum RunStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+
+  @@map("run_status")
+}
+
+model User {
+  id           String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email        String          @unique(map: "users_email_key")
+  displayName  String          @map("display_name")
+  passwordHash String          @map("password_hash")
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime        @default(now()) @map("updated_at") @db.Timestamptz(3)
+  circuits     Circuit[]
+  runs         SimulationRun[]
+  shares       CircuitShare[]
+  sessions     Session[]
+
+  @@map("users")
+}
+
+model Circuit {
+  id           String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  // Required for every new circuit (a NOT VALID CHECK); NULL only on circuits from before accounts.
+  ownerId      String?           @map("owner_id") @db.Uuid
+  name         String
+  description  String?
+  version      Int               @default(1)
+  gateCount    Int               @map("gate_count")
+  wireCount    Int               @map("wire_count")
+  inputKeys    String[]          @map("input_keys")
+  outputKeys   String[]          @map("output_keys")
+  feedbackLoop String[]          @default([]) @map("feedback_loop") // empty: no loop
+  visibility   CircuitVisibility @default(private)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime          @default(now()) @map("updated_at") @db.Timestamptz(3)
+  owner        User?             @relation(fields: [ownerId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  gates        Gate[]
+  wires        Wire[]
+  runs         SimulationRun[]
+  shares       CircuitShare[]
+
+  // The public lists' indexes are partial (WHERE visibility = 'public'), so they are in the SQL only.
+  @@index([ownerId, createdAt, id], map: "circuits_owner_created_at_idx")
+  @@index([ownerId, updatedAt, id], map: "circuits_owner_updated_at_idx")
+  @@index([ownerId, name, id], map: "circuits_owner_name_idx")
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "circuits_name_trgm_idx", type: Gin)
+  @@map("circuits")
+}
+
+model Gate {
+  circuitId  String   @map("circuit_id") @db.Uuid
+  key        String
+  position   Int
+  type       GateType
+  label      String?
+  constValue Int?     @map("const_value") @db.SmallInt
+  circuit    Circuit  @relation(fields: [circuitId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  drives     Wire[]   @relation("WireSource")
+  drivenBy   Wire[]   @relation("WireTarget")
+
+  @@id([circuitId, key])
+  @@unique([circuitId, position], map: "gates_position_key")
+  @@map("gates")
+}
+
+model Wire {
+  circuitId String  @map("circuit_id") @db.Uuid
+  targetKey String  @map("target_key")
+  targetPin Int     @map("target_pin") @db.SmallInt
+  sourceKey String  @map("source_key")
+  position  Int
+  key       String?
+  circuit   Circuit @relation(fields: [circuitId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  source    Gate    @relation("WireSource", fields: [circuitId, sourceKey], references: [circuitId, key], onDelete: Cascade, onUpdate: Cascade, map: "wires_source_fkey")
+  target    Gate    @relation("WireTarget", fields: [circuitId, targetKey], references: [circuitId, key], onDelete: Cascade, onUpdate: Cascade, map: "wires_target_fkey")
+
+  @@id([circuitId, targetKey, targetPin])
+  @@unique([circuitId, position], map: "wires_position_key")
+  @@unique([circuitId, key], map: "wires_key_key")
+  @@index([circuitId, sourceKey], map: "wires_source_idx")
+  @@map("wires")
+}
+
+model SimulationRun {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  circuitId      String    @map("circuit_id") @db.Uuid
+  circuitVersion Int       @map("circuit_version")
+  userId         String?   @map("user_id") @db.Uuid
+  kind           RunKind
+  status         RunStatus
+  inputs         Json?
+  rowOffset      BigInt?   @map("row_offset")
+  rowLimit       Int?      @map("row_limit")
+  outputs        Json?
+  errorCode      String?   @map("error_code")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  startedAt      DateTime? @map("started_at") @db.Timestamptz(3)
+  finishedAt     DateTime? @map("finished_at") @db.Timestamptz(3)
+  circuit        Circuit   @relation(fields: [circuitId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([circuitId, createdAt(sort: Desc)], map: "simulation_runs_circuit_idx")
+  @@index([userId, createdAt(sort: Desc)], map: "simulation_runs_user_idx")
+  @@map("simulation_runs")
+}
+
+model CircuitShare {
+  circuitId String    @map("circuit_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  role      ShareRole
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+  circuit   Circuit   @relation(fields: [circuitId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([circuitId, userId])
+  @@index([userId, circuitId], map: "circuit_shares_user_idx")
+  @@map("circuit_shares")
+}
+
+model Session {
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  secretHash  Bytes    @map("secret_hash") // SHA-256 of the refresh token's secret, never the secret
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  refreshedAt DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(3)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(3)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId], map: "sessions_user_id_idx")
+  @@index([expiresAt], map: "sessions_expires_at_idx")
+  @@map("sessions")
+}

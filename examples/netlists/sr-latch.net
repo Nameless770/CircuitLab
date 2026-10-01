@@ -1,0 +1,13 @@
+# SR latch: two cross-coupled NOR gates. Each one feeds the other, which is how a
+# latch stores a bit. The file is structurally valid, so it imports fine; the loop
+# only matters when the circuit is compiled for combinational simulation.
+.name "SR latch"
+
+S = INPUT
+R = INPUT
+
+q    = NOR(R, qbar)
+qbar = NOR(S, q)
+
+out_q    = OUTPUT(q)
+out_qbar = OUTPUT(qbar)
