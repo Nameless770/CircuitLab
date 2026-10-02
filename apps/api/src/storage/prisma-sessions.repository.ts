@@ -41,6 +41,11 @@ export class PrismaSessionsRepository extends SessionsRepository {
     if (!UUID.test(sessionId)) return;
     await this.prisma.session.deleteMany({ where: { id: sessionId } });
   }
+
+  /** queries.sql: delete_expired_sessions */
+  async deleteExpired(now: Date): Promise<number> {
+    return (await this.prisma.session.deleteMany({ where: { expiresAt: { lte: now } } })).count;
+  }
 }
 
 /** Prisma takes bytes as a plain Uint8Array over an ArrayBuffer; a Node Buffer may sit on a shared pool. */

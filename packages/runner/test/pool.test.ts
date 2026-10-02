@@ -1,5 +1,5 @@
 import { CycleError, OscillationError, SimulationInputError, combinational, truthTable, type Bit } from "@circuitlab/engine";
-import { PoolBusyError, PoolClosedError, SimulationPool, WorkerCrashedError } from "@circuitlab/runner";
+import { PoolBusyError, PoolClosedError, SimulationPool, WorkerCrashedError, pack, unpack } from "@circuitlab/runner";
 import { afterEach, describe, expect, it } from "vitest";
 import { circuit, fullAdder, inverterRing, random, randomCircuit, rippleCarryAdder, srLatch, type GateSpec } from "../../engine/test/fixtures";
 
@@ -50,6 +50,20 @@ describe("SimulationPool: same answers as the engine, computed on worker threads
       rows.push(...page.rows);
     }
     expect(rows).toEqual(whole.rows);
+  });
+
+  it("hands out the same pages in their compact form, one byte per output and no inputs", async () => {
+    const workers = pool({ size: 2 });
+    const adder = rippleCarryAdder(4);
+    const expected = truthTable(adder, { offset: 30, limit: 150 });
+    const pages = [];
+    for await (const page of workers.packedTruthTablePages(adder, { pageSize: 64, offset: 30, limit: 150 })) {
+      expect(page.outputs).toHaveLength(page.rowCount * page.outputIds.length);
+      pages.push(page);
+    }
+    expect(pages.map((page) => [page.offset, page.rowCount])).toEqual([[30, 64], [94, 64], [158, 22]]);
+    expect(pages.flatMap((page) => unpack(page).rows)).toEqual(expected.rows);
+    expect(unpack(pack(expected))).toEqual(expected);
   });
 
   it("rejects with the engine's own error classes, rebuilt on this side of the thread", async () => {

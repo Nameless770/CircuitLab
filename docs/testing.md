@@ -1,11 +1,16 @@
-# CircuitLab testing (phase 8, extended in phase 9)
+# CircuitLab testing (phase 8, extended in phases 9 and 10)
 
 ```bash
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 633 of them in about 15 seconds. The
-API's integration tests run twice: once with storage in memory, once on a real PostgreSQL 18.
+That builds everything, type-checks the tests, and runs all 709 of them in about 25 seconds. The
+API's integration tests run twice: once with everything in memory, and once as production runs,
+on a real PostgreSQL 18 and a real Redis 8.
+
+**Docker must be running** (since phase 10). Each test file that needs Redis starts its own, in a
+container (`redis:8-alpine`), and the test with several processes also starts a PostgreSQL
+(`postgres:18-alpine`). Without Docker those files fail at once, and say so.
 
 | Command | What it does |
 | --- | --- |
@@ -41,9 +46,9 @@ version (412) instead of overwriting someone's change"), so a failure says which
 | --- | --- | --- |
 | engine | 148 | Every gate type for every input combination (2 to 5 inputs, and 64-input gates on chosen vectors); known circuits against independent references; validation issues and their locations; sorting and cycles; simulation inputs; truth tables up to 2^53 rows; errors crossing JSON. Phase 9: the gate registry and factory; both simulation strategies (latches, flip-flops, a divide-by-two counter, oscillators, state checks); Tarjan's components against brute-force reachability |
 | netlist | 20 | Reading, writing, and round trips; streamed input split at every possible byte (inside multi-byte characters too); every mistake in `broken.net` at its line; line-length and gate limits; gzip; cancellation |
-| runner | 9 | Worker threads give the engine's exact answers and errors; overload (503 material), cancellation, time-outs, closing; a task that runs out of memory crashes only its own worker; sequential steps with state crossing the thread |
-| api-contract | 90 | `openapi.yaml` and the code agree on every limit, code, and mode; request validation; RFC 9457 problems; cursor paging (no skips or repeats while circuits are added); ETags; content negotiation |
-| api | 366 | The whole API over HTTP, against memory (160) and PostgreSQL (160); the time rules with an injected clock, on both (10); the app's smaller parts directly (33); startup and run-time database failures (3) |
+| runner | 10 | Worker threads give the engine's exact answers and errors; overload (503 material), cancellation, time-outs, closing; a task that runs out of memory crashes only its own worker; sequential steps with state crossing the thread; phase 10's compact pages |
+| api-contract | 97 | `openapi.yaml` and the code agree on every limit, code, and mode; request validation; RFC 9457 problems; cursor paging (no skips or repeats while circuits are added); ETags; content negotiation; phase 10's job limits and job resource |
+| api | 434 | The whole API over HTTP, all in memory (175) and on PostgreSQL and Redis (175); the time rules with an injected clock, on both (16); the app's smaller parts directly (55); database failures (3); Redis failures and settings (5); several processes sharing PostgreSQL and Redis (5) |
 
 **Known circuits, checked against independent references.** The half adder against its truth table;
 the full adder against `S + 2·Cout = A + B + Cin`; a 6-bit ripple-carry adder for all 8,192
@@ -63,7 +68,7 @@ happens again on the next run and can be debugged.
 - **Every operation must be exercised:** the last test fails if some operation was never called
   successfully.
 
-So all ~300 integration tests are also contract tests.
+So all ~370 integration tests are also contract tests.
 
 **The access rules are tested as the table they are.** Owner, editor, viewer, stranger, and a
 signed-out visitor each try nine actions on a private and on a public circuit, expecting exactly
@@ -74,6 +79,28 @@ compiled to WebAssembly) on a free port. It migrates it with `prisma migrate dep
 production does, and runs the app on it with one database connection (PGlite's limit; see
 [database-design.md](database-design.md)). The database-failure tests also stop and restart it
 under a running app.
+
+**Redis and BullMQ, for real (phase 10).** Nothing imitates Redis well enough for BullMQ, which
+runs Lua scripts and blocking commands, so the tests use real Redis servers, in Docker, one per
+test file ([containers.ts](../apps/api/test/support/containers.ts)):
+- **The PostgreSQL suites now also use Redis:** the cache, the throttle, and jobs going through
+  BullMQ, under the same tests as in memory. Two new suites run on both setups: the cache (hits,
+  misses, versions, the access check first) and jobs (the whole lifecycle; downloads byte for byte
+  equal to the synchronous ones; limits; who sees what; cancelling).
+- **Several processes** ([processes.test.ts](../apps/api/test/processes.test.ts)): two API-only
+  instances and a separate worker share one PostgreSQL and one Redis.
+  - Jobs queued by one instance wait, are found by the other, are computed by the worker, and
+    report progress to both.
+  - The same request through either instance gets the same job, and the allowance holds across
+    instances.
+  - A worker stopped halfway hands its job to the next one.
+  - The sign-in throttle and the cache are shared.
+
+  Several processes can't share one PGlite, so this file runs PostgreSQL in a container too.
+- **Redis failing** ([redis.test.ts](../apps/api/test/redis.test.ts)): starting without it; a
+  separate Redis for the cache; Redis stopped under a running app (simulating carries on uncached,
+  sign-in and new jobs answer 503, and everything recovers without a restart); Redis frozen (503
+  after two seconds rather than a hung request).
 
 ## Do the tests catch bugs?
 
@@ -105,9 +132,23 @@ Phase 9 planted five more, in the code it added, and all were caught as well:
 | The registry's NOR computes OR | the NOR gate tests |
 | The token service ignores the injected clock | the access token expiring after 15 minutes |
 
+Phase 10 planted eight more, in its own code (in the TypeScript sources, rebuilt each time), and
+all were caught:
+
+| Planted bug | Caught by |
+| --- | --- |
+| The cache key forgets the circuit version | `never answers from an old version` |
+| The cache key forgets the state of a sequential step | `keeps sequential steps apart by the state they start from` |
+| The cache is looked at before the access check | `checks who is asking before looking in the cache` |
+| An identical unfinished job isn't handed back | the several-processes test |
+| A third job is let in while two are unfinished | the several-processes test |
+| The Redis throttle reads the real time, not the injected clock | the throttle's time test, on Redis |
+| A result is still served after its 24 hours | `keeps a job's result for 24 hours, then answers 410` |
+| The in-memory cache evicts the oldest entry, not the least recently used | the cache's unit test |
+
 This is mutation testing by hand; a tool such as Stryker automates it.
 
-**Coverage:** 94% of statements, 85% of branches, 97% of functions. It is measured on the built
+**Coverage:** 95% of statements, 85% of branches, 97% of functions. It is measured on the built
 JavaScript and mapped back to the TypeScript through tsc's source maps. The thresholds sit a little
 below that, so a change that drops coverage noticeably fails `npm run test:coverage`. Code running
 in worker threads isn't measured (V8 coverage doesn't follow them); the pool tests check its
@@ -126,8 +167,17 @@ results instead.
   - **Fix:** both added (18 responses), with spec tests that keep them documented.
 - **The two storages disagreed about bad cursors.** PostgreSQL refused a forged time cursor (400);
   memory accepted it. The check moved into the contract, where both use it.
-- **db:check didn't run every query it claimed to.** It now fails unless all 29 named queries
-  run (found while extending it for phase 7).
+- **db:check didn't run every query it claimed to.** It now fails unless every named query runs
+  (41 since phase 10; found while extending it for phase 7).
+- **Phase 10: a job that couldn't be queued counted against its owner.** While Redis was down, the
+  job's record was kept as failed, and used up one of the user's 20 daily jobs for an outage that
+  was ours. Now such a job is forgotten, like any request turned away with 503.
+- **Phase 10: recovering took up to 20 seconds.** After Redis came back, BullMQ's own connections
+  waited up to 20 seconds between attempts to reconnect (its default), so new jobs failed long
+  after everything else worked again. They now retry as often as the app's own client: at most
+  every 2 seconds.
+- **Phase 10: a finished job couldn't be looked at while Redis was down,** because checking for its
+  result failed. The job is now reported, without the result's link.
 
 ## Time, without waiting (phase 9)
 
@@ -139,14 +189,22 @@ injection, so the tests hand it one they control and move it forward. They check
 - **blocked sign-ins** unblock after 15 minutes;
 - **circuits, edits, and runs** are stamped with that time.
 
-They run on both storages; see [design-patterns.md](design-patterns.md).
+Phase 10 added:
+- **a job's result** expiring after 24 hours (410 after that);
+- **the daily allowance** of 20 jobs growing again 24 hours after the oldest, as `Retry-After` says;
+- **housekeeping** failing a lost job after an hour, and deleting expired sessions.
+
+They run on both setups, so the Redis throttle and the job results answer to the injected clock
+too; see [design-patterns.md](design-patterns.md).
 
 ## Not covered
 
 - **Load and performance:** phase 12's system design.
 - **A browser front end:** phase 13, if there is one.
-- **Continuous integration:** the project isn't in a git repository yet. A workflow running
-  `npm test` and `npm run db:check` on every push fits phase 11, next to Docker.
+- **Continuous integration:** a workflow running `npm test` (with Docker) and `npm run db:check`
+  on every push fits phase 11, next to Docker.
+- **The housekeeping schedule itself:** the tests run housekeeping directly, and check that the
+  BullMQ schedule exists; they don't wait 10 minutes for it.
 - **An upstream warning:** Prisma's PostgreSQL adapter triggers a `pg` deprecation warning
   ("client.query() when the client is already executing a query") inside transactions. It is in
   Prisma's code, not ours, and harmless with `pg` 8.

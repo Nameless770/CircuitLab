@@ -1,4 +1,4 @@
-# CircuitLab database design (phases 5 to 9)
+# CircuitLab database design (phases 5 to 10)
 
 The schema is the SQL migrations in
 [`packages/database/prisma/migrations`](../packages/database/prisma/migrations) (PostgreSQL 18),
@@ -11,7 +11,8 @@ WebAssembly, running inside Node, so there's nothing to install.
 Phase 5 designed the schema; phase 6 connected the API to it (see
 [Connecting the API: Prisma](#connecting-the-api-prisma-phase-6)); phase 7 added accounts, sharing,
 and sessions (see [Accounts and sharing](#accounts-and-sharing-phase-7), and
-[auth-design.md](auth-design.md) for the rules).
+[auth-design.md](auth-design.md) for the rules); phase 10 made truth-table jobs runs (see
+[Truth-table jobs](#truth-table-jobs-phase-10)).
 
 ```mermaid
 erDiagram
@@ -128,10 +129,10 @@ cheap and complete. Rules about the circuit as a whole need the whole graph, and
 in one place, the engine (phase 1). Repeating them in triggers would mean two copies of the same
 rules that could drift apart.
 
-`npm run db:check` tries 30 bad rows, and each is refused by the expected rule. It also checks that
+`npm run db:check` tries 31 bad rows, and each is refused by the expected rule. It also checks that
 the `gate_type` and `simulation_mode` enums list exactly the engine's gate registry and simulation
 strategies (phase 9), so adding a gate type without its migration fails the check. And it runs every
-one of the 29 named queries in queries.sql, and fails if one was never run.
+one of the 41 named queries in queries.sql, and fails if one was never run.
 
 ## Order is data
 
@@ -180,7 +181,8 @@ and wires imply, so a list page reads one table instead of thousands of gate row
 | A circuit's gates and wires, in order | The unique `(circuit_id, position)` indexes |
 | Wires by source (fan-out; deleting a gate) | `wires (circuit_id, source_key)` |
 | A circuit's or a user's recent runs | `simulation_runs (circuit_id, created_at DESC)`, `(user_id, created_at DESC)` |
-| Unfinished runs (phase 10's job queue) | A partial index `WHERE status IN ('queued', 'running')`, which stays small however long the history grows |
+| Unfinished runs: housekeeping's lost jobs (phase 10) | A partial index `WHERE status IN ('queued', 'running')`, which stays small however long the history grows |
+| A user's jobs: their allowance, and an identical unfinished job (phase 10) | `simulation_runs (user_id, created_at DESC) WHERE kind = 'truth_table'`, partial, so a user's simulations don't fill it |
 
 **Cursor vs OFFSET.** The cursor pagination designed in phase 3 is a row comparison:
 `WHERE (created_at, id) < ($cursor_time, $cursor_id)`. In `db:check`, with 50,000 circuits of
@@ -204,10 +206,10 @@ order the API's cursors assume, and it doesn't depend on the server's language s
 
 A run records which circuit was simulated, at which version, by whom, what was asked, and how it
 ended.
-- **`kind`:** `simulate` (inputs and outputs as `jsonb`) or `truth_table` (a row range; tables are
-  too big to store, and phase 10 decides where background results go).
-- **`status`:** `queued`, `running`, `succeeded`, `failed` or `cancelled`. That covers today's
-  synchronous runs and phase 10's background jobs, so phase 10 won't need a new status.
+- **`kind`:** `simulate` (inputs and outputs as `jsonb`) or `truth_table`, a background job (a row
+  range; its rows are kept in Redis for a day, not here).
+- **`status`:** `queued`, `running`, `succeeded`, `failed` or `cancelled`. That covered phase 10's
+  background jobs before they existed: phase 10 needed no new status, nor any new column.
 - **CHECKs tie fields to kind and status.** For example, a succeeded simulation has outputs, a
   failed run has an error code, and a queued run hasn't started.
 
@@ -258,7 +260,7 @@ is there to enforce. So it goes the other way:
    `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
    against the migrated database. Any difference fails the check.
 
-An applied migration is never edited; a change is a new migration. There are five:
+An applied migration is never edited; a change is a new migration. There are six:
 
 | Migration | What and why |
 | --- | --- |
@@ -267,6 +269,7 @@ An applied migration is never edited; a change is a new migration. There are fiv
 | `20261001180000_millisecond_timestamps` | Timestamps stored to the millisecond (`timestamptz(3)`) |
 | `20261001210000_accounts_and_sharing` | Phase 7: owners, visibility, shares, sessions, and the new list indexes |
 | `20261001230000_simulation_mode` | Phase 9: each run's `mode` (`combinational` or `sequential`, earlier runs combinational), and a CHECK that truth tables are combinational |
+| `20261001233000_truth_table_jobs` | Phase 10: one partial index, of each user's jobs |
 
 The second and third came from bugs found while connecting Prisma:
 
@@ -353,6 +356,35 @@ The rules are in [auth-design.md](auth-design.md). What they need from the datab
     and the plans made while the tables held a handful of rows suit tiny tables. New statistics
     make it plan again.
   - **On a real server,** autovacuum updates statistics as tables grow; PGlite has no autovacuum.
+
+## Truth-table jobs (phase 10)
+
+A background truth-table job is a row of `simulation_runs` with `kind = 'truth_table'`. The table
+was designed for it in phase 5, so the migration only adds an index. How the jobs work is in
+[caching-and-jobs.md](caching-and-jobs.md); what the database does for them:
+
+- **Starting a job is one transaction:**
+  1. `lock_user_jobs` takes an advisory lock on the user (`pg_advisory_xact_lock`, released at the
+     end of the transaction);
+  2. `identical_unfinished_job` looks for the same request still waiting or running, which is
+     handed back instead;
+  3. `job_allowance` counts the user's jobs in the last 24 hours, and the unfinished ones;
+  4. `insert_job`.
+
+  Without the lock, two requests at once could both count 1 unfinished job, and both start one, past
+  the limit of 2. With it, the second waits for the first to commit, then sees its job.
+- **Every status change is a compare-and-swap:** `start_job` matches only `queued` or `running`
+  jobs, `complete_job` only `running` ones, `cancel_job` and `fail_job` only unfinished ones. So a
+  status only moves forward, and of a cancellation and a finishing worker, exactly one wins
+  (`db:check` shows each refusal: 0 rows changed).
+- **A job that couldn't be queued is deleted** (`discard_job`, only while still queued): its request
+  was answered with 503 and, like a simulation turned away, leaves no trace.
+- **Housekeeping fails lost jobs** (`fail_abandoned_jobs`): unfinished an hour after they were
+  requested. Phase 5's partial index of unfinished runs serves it, and stays small however long the
+  history grows. The same housekeeping runs `delete_expired_sessions`, which phase 7 wrote for it.
+- **Indexes, measured** in `db:check` with 60,000 runs: a user's allowance reads only their jobs
+  (`simulation_runs_user_jobs_idx`, under 0.1 ms), and the lost-job sweep reads only unfinished runs
+  (`simulation_runs_unfinished_idx`).
 
 ## For the next phases
 

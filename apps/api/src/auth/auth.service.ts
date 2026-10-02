@@ -53,15 +53,15 @@ export class AuthService {
   async login(input: SignInRequest, clientAddress: string): Promise<AuthSession> {
     const email = normalizeEmail(input.email);
     const throttleKey = `${email} ${clientAddress}`;
-    this.throttle.check(throttleKey);
+    await this.throttle.check(throttleKey);
     const user = await this.users.findByEmail(email);
     // Verified even when there's no such account (against a decoy hash): same work, same timing.
     const valid = await this.passwords.verify(user?.passwordHash, input.password);
     if (user === undefined || !valid) {
-      this.throttle.failed(throttleKey);
+      await this.throttle.failed(throttleKey);
       throw invalidCredentials();
     }
-    this.throttle.succeeded(throttleKey);
+    await this.throttle.succeeded(throttleKey);
     if (this.passwords.needsRehash(user.passwordHash)) {
       await this.users.updatePasswordHash(user.id, await this.passwords.hash(input.password));
     }

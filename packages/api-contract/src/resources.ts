@@ -94,6 +94,9 @@ export interface RunRecord {
   /** As sent, so possibly invalid when the run failed. */
   readonly inputs: Readonly<Record<string, unknown>> | null;
   readonly outputs: Readonly<Record<string, Bit>> | null;
+  /** Truth-table jobs: which rows. */
+  readonly offset: number | null;
+  readonly limit: number | null;
   /** The problem code the API answered with, when the run failed. */
   readonly errorCode: string | null;
   readonly createdAt: Date;
@@ -109,6 +112,8 @@ export function runResource(run: RunRecord): SimulationRunResource {
     status: run.status,
     ...(run.inputs !== null && { inputs: run.inputs }),
     ...(run.outputs !== null && { outputs: run.outputs }),
+    ...(run.offset !== null && { offset: run.offset }),
+    ...(run.limit !== null && { limit: run.limit }),
     ...(run.errorCode !== null && { errorCode: run.errorCode }),
     createdAt: run.createdAt.toISOString(),
     ...(run.finishedAt !== null && { finishedAt: run.finishedAt.toISOString() }),

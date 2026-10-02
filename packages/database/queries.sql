@@ -168,7 +168,7 @@ RETURNING id;
 -- name: recent_runs
 -- What the circuit's owner sees: everyone's runs. $1 circuit id, $2 how many. Served by
 -- simulation_runs_circuit_idx.
-SELECT id, circuit_version, kind, mode, status, inputs, outputs, error_code, created_at, finished_at
+SELECT id, circuit_version, kind, mode, status, inputs, outputs, row_offset, row_limit, error_code, created_at, finished_at
 FROM simulation_runs
 WHERE circuit_id = $1
 ORDER BY created_at DESC
@@ -176,12 +176,99 @@ LIMIT $2;
 
 -- name: recent_runs_by_user
 -- What anyone else sees: only their own runs. $1 circuit id, $2 how many, $3 user id.
-SELECT id, circuit_version, kind, mode, status, inputs, outputs, error_code, created_at, finished_at
+SELECT id, circuit_version, kind, mode, status, inputs, outputs, row_offset, row_limit, error_code, created_at, finished_at
 FROM simulation_runs
 WHERE circuit_id = $1 AND user_id = $3
 ORDER BY created_at DESC
 LIMIT $2;
 
+
+
+-- Truth-table jobs (phase 10) ------------------------------------------------------------------
+-- A job is a run of kind 'truth_table'. Its status only ever moves forward, and every change is a
+-- compare-and-swap on the status, so a cancellation and a finishing worker can't both win.
+
+-- name: lock_user_jobs
+-- Starting a job is one transaction: this lock, the allowance, then the insert. The lock (released
+-- when the transaction ends) makes two requests from one user take turns, so both can't squeeze
+-- under the allowance at once. $1 user id.
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
+
+-- name: job_allowance
+-- What a user may still start: jobs started since $2 (24 hours ago), the unfinished ones among
+-- them, and when the oldest started (when the allowance next grows). $1 user id. Served by
+-- simulation_runs_user_jobs_idx.
+SELECT count(*) AS started,
+       count(*) FILTER (WHERE status IN ('queued', 'running')) AS unfinished,
+       min(created_at) AS oldest
+FROM simulation_runs
+WHERE user_id = $1 AND kind = 'truth_table' AND created_at > $2;
+
+-- name: identical_unfinished_job
+-- The same request again while the first is still waiting or running (a client retrying after a
+-- lost answer) gets the first job back. $1 user id, $2 circuit id, $3 version, $4 offset, $5 limit.
+-- Served by simulation_runs_user_jobs_idx.
+SELECT id FROM simulation_runs
+WHERE user_id = $1 AND kind = 'truth_table' AND status IN ('queued', 'running')
+  AND circuit_id = $2 AND circuit_version = $3 AND row_offset = $4 AND row_limit = $5
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: insert_job
+-- $1 circuit id, $2 version, $3 user id, $4 offset, $5 limit, $6 now.
+INSERT INTO simulation_runs (circuit_id, circuit_version, user_id, kind, status, row_offset, row_limit, created_at)
+VALUES ($1, $2, $3, 'truth_table', 'queued', $4, $5, $6)
+RETURNING id;
+
+-- name: get_job
+-- A job, for the person who started it. $1 job id, $2 circuit id, $3 user id.
+SELECT id, circuit_id, circuit_version, user_id, status, row_offset, row_limit, error_code, created_at, started_at, finished_at
+FROM simulation_runs
+WHERE id = $1 AND circuit_id = $2 AND user_id = $3 AND kind = 'truth_table';
+
+-- name: start_job
+-- A worker takes the job. Also matches 'running': a retry after a failed attempt starts again.
+-- Nothing back means it was cancelled (or deleted with its circuit), and the worker skips it.
+-- $1 job id, $2 now.
+UPDATE simulation_runs SET status = 'running', started_at = $2
+WHERE id = $1 AND kind = 'truth_table' AND status IN ('queued', 'running')
+RETURNING circuit_id, circuit_version, row_offset, row_limit;
+
+-- name: job_status
+-- Asked by the worker between pages: has someone cancelled the job? $1 job id.
+SELECT status FROM simulation_runs WHERE id = $1;
+
+-- name: complete_job
+-- Only a running job can succeed. Nothing back means it was cancelled meanwhile, and its result is
+-- thrown away. $1 job id, $2 now.
+UPDATE simulation_runs SET status = 'succeeded', finished_at = $2
+WHERE id = $1 AND status = 'running'
+RETURNING id;
+
+-- name: fail_job
+-- $1 job id, $2 now, $3 the problem code.
+UPDATE simulation_runs SET status = 'failed', finished_at = $2, error_code = $3
+WHERE id = $1 AND status IN ('queued', 'running')
+RETURNING id;
+
+-- name: cancel_job
+-- $1 job id, $2 now.
+UPDATE simulation_runs SET status = 'cancelled', finished_at = $2
+WHERE id = $1 AND status IN ('queued', 'running')
+RETURNING id;
+
+-- name: discard_job
+-- A job that couldn't be queued (Redis was down): its request was answered with 503, so, like a
+-- simulation turned away, it leaves no trace. Only a job no worker has touched. $1 job id.
+DELETE FROM simulation_runs WHERE id = $1 AND kind = 'truth_table' AND status = 'queued';
+
+-- name: fail_abandoned_jobs
+-- Housekeeping: a job still unfinished an hour after it was requested has been lost (say its
+-- worker's machine died and Redis lost the job too). $1 now, $2 an hour ago. Served by
+-- simulation_runs_unfinished_idx, which only holds unfinished runs.
+UPDATE simulation_runs SET status = 'failed', finished_at = $1, error_code = 'internal-error'
+WHERE status IN ('queued', 'running') AND created_at < $2
+RETURNING id;
 
 -- Sharing --------------------------------------------------------------------------------------
 
@@ -238,5 +325,6 @@ RETURNING user_id;
 DELETE FROM sessions WHERE id = $1;
 
 -- name: delete_expired_sessions
--- Housekeeping, for a scheduled job (phase 10). $1 now. Served by sessions_expires_at_idx.
+-- Housekeeping, run every 10 minutes by a scheduled job (phase 10). $1 now. Served by
+-- sessions_expires_at_idx.
 DELETE FROM sessions WHERE expires_at <= $1;

@@ -118,9 +118,42 @@ export interface SimulationRunResource {
   readonly status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   readonly inputs?: Readonly<Record<string, unknown>>;
   readonly outputs?: Readonly<Record<string, Bit>>;
+  /** Truth-table jobs: which rows. */
+  readonly offset?: number;
+  readonly limit?: number;
   readonly errorCode?: string;
   readonly createdAt: string;
   readonly finishedAt?: string;
+}
+
+export type RunStatus = SimulationRunResource["status"];
+
+/** Schema `TruthTableJobRequest`, with the defaults filled in except `limit` ("to the end"). */
+export interface TruthTableJobRequest {
+  readonly offset: number;
+  readonly limit?: number;
+  /** Refuse (409) unless the circuit is still at this version. */
+  readonly version?: number;
+}
+
+/** Schema `TruthTableJob`. */
+export interface TruthTableJobResource {
+  readonly id: string;
+  readonly circuitId: string;
+  readonly circuitVersion: number;
+  readonly status: RunStatus;
+  readonly offset: number;
+  /** Rows in this job. */
+  readonly limit: number;
+  readonly rowsDone: number;
+  /** The problem code it failed with. */
+  readonly errorCode?: string;
+  readonly createdAt: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+  /** Until when the result can be downloaded. */
+  readonly expiresAt?: string;
+  readonly links: { readonly self: string; readonly circuit: string; readonly result?: string };
 }
 
 /** Schema `SimulationRunList`. */

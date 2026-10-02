@@ -53,6 +53,8 @@ export class PrismaRunsRepository extends RunsRepository {
       status: row.status,
       inputs: (row.inputs as Record<string, unknown> | null) ?? null,
       outputs: (row.outputs as RunRecord["outputs"]) ?? null,
+      offset: row.rowOffset === null ? null : Number(row.rowOffset),
+      limit: row.rowLimit,
       errorCode: row.errorCode,
       createdAt: row.createdAt,
       finishedAt: row.finishedAt,

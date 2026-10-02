@@ -29,7 +29,8 @@ export default defineConfig({
         "packages/database/dist/generated/**", // Prisma's generated client
         "packages/database/dist/check-schema.js", // a script: npm run db:check
         "packages/database/dist/dev-server.js", // a script: npm run db:start
-        "apps/api/dist/main.js", // the process entry point
+        "apps/api/dist/main.js", // the process entry points: the API
+        "apps/api/dist/worker.js", // and a worker (createWorker, which they call, is tested)
         "packages/runner/dist/worker.js", // runs in worker threads, which V8 coverage doesn't follow
       ],
       // A little below what the tests reach today: a change that drops coverage noticeably fails the run.

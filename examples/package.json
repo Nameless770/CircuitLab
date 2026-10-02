@@ -8,7 +8,8 @@
     "demo:netlist": "node dist/netlist-demo.js",
     "demo:async": "node dist/async-demo.js",
     "demo:api": "node dist/api-demo.js",
-    "demo:http": "node dist/http-demo.js"
+    "demo:http": "node dist/http-demo.js",
+    "demo:jobs": "node dist/jobs-demo.js"
   },
   "dependencies": {
     "@circuitlab/api": "^0.1.0",

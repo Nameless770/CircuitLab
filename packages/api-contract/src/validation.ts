@@ -4,7 +4,17 @@
 
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020";
 import { GATE_TYPES, assertValidCircuit, type Circuit } from "@circuitlab/engine";
-import type { CircuitInput, CircuitMetadataPatch, ListScope, RefreshRequest, RegisterRequest, ShareRequest, SignInRequest, SimulateRequest } from "./dto";
+import type {
+  CircuitInput,
+  CircuitMetadataPatch,
+  ListScope,
+  RefreshRequest,
+  RegisterRequest,
+  ShareRequest,
+  SignInRequest,
+  SimulateRequest,
+  TruthTableJobRequest,
+} from "./dto";
 import { LIMITS } from "./limits";
 import { decodeCursor, type CircuitCursor, type CircuitSort } from "./pagination";
 import { ApiError, escapePointer, type ProblemCode, type ProblemIssue } from "./problems";
@@ -134,6 +144,23 @@ export function parseShareRequest(body: unknown): ShareRequest {
   requireObject(body, 'a JSON object such as {"email": "bob@example.com", "role": "viewer"}');
   checkSchema("ShareRequest", body, "invalid-fields", "The share");
   return body as unknown as ShareRequest;
+}
+
+/**
+ * Which rows a background job should compute. Whether they fit is checked against the circuit
+ * (`jobRange`).
+ *
+ * @throws ApiError `malformed-body` (400) or `invalid-fields` (422)
+ */
+export function parseTruthTableJobRequest(body: unknown): TruthTableJobRequest {
+  requireObject(body, 'a JSON object such as {"offset": 0, "limit": 4194304}, or {} for the whole table');
+  checkSchema("TruthTableJobRequest", body, "invalid-fields", "The job");
+  const request = body as { offset?: number; limit?: number; version?: number };
+  return {
+    offset: request.offset ?? 0,
+    ...(request.limit !== undefined && { limit: request.limit }),
+    ...(request.version !== undefined && { version: request.version }),
+  };
 }
 
 function requireObject(body: unknown, expected: string): asserts body is Record<string, unknown> {

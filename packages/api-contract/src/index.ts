@@ -13,6 +13,7 @@ export type {
   ListScope,
   RefreshRequest,
   RegisterRequest,
+  RunStatus,
   ShareList,
   ShareRequest,
   ShareResource,
@@ -22,6 +23,8 @@ export type {
   SimulationResponse,
   SimulationRunList,
   SimulationRunResource,
+  TruthTableJobRequest,
+  TruthTableJobResource,
   TruthTablePage,
   TruthTableStreamRow,
   UserResource,
@@ -59,6 +62,7 @@ export {
   parseSignInRequest,
   parseSimulateQuery,
   parseSimulateRequest,
+  parseTruthTableJobRequest,
   parseTruthTableQuery,
   validateAgainstSchema,
 } from "./validation";
@@ -91,6 +95,9 @@ export {
   validationReport,
 } from "./resources";
 export type { CircuitHeader, CircuitRecord, RunRecord, ShareRecord, UserRecord } from "./resources";
+
+export { isUnfinished, jobFailed, jobRange, jobResource, jobUnfinished, resultExpiry, resultGone, tooManyJobs } from "./jobs";
+export type { JobRecord } from "./jobs";
 
 export { circuitETag, ifMatchPasses, isNotModified, truthTableETag } from "./etag";
 export { MEDIA_TYPES, encodeTruthTable, negotiate, requestMediaType, responseMediaType, truthTableFormat } from "./formats";

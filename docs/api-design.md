@@ -1,9 +1,10 @@
-# CircuitLab API design (phase 3, extended in phases 6 to 8)
+# CircuitLab API design (phase 3, extended in phases 6 to 10)
 
 The contract is [`packages/api-contract/openapi.yaml`](../packages/api-contract/openapi.yaml).
 This document explains the decisions behind it. `npm run demo:api` shows the API's answers,
 request by request. Accounts and access (phase 7) are explained in
-[auth-design.md](auth-design.md).
+[auth-design.md](auth-design.md), and caching and background jobs (phase 10) in
+[caching-and-jobs.md](caching-and-jobs.md).
 
 ## Contract first
 
@@ -35,13 +36,19 @@ Phase 4 wires it into NestJS, and phases 5 and 6 add storage.
 | `DELETE /v1/circuits/{id}` | Delete |
 | `POST /v1/circuits/{id}/simulate` | Evaluate once; `include=signals` adds every gate's signal |
 | `GET /v1/circuits/{id}/truth-table` | Rows by `offset` and `limit`, as JSON pages, NDJSON, or CSV |
-| `GET /v1/circuits/{id}/runs` | Recent simulations (phase 6) |
+| `GET /v1/circuits/{id}/runs` | Recent simulations and truth-table jobs (phase 6) |
+| `POST /v1/circuits/{id}/truth-table/jobs` | Start a background truth-table job: 202 and its URL (phase 10) |
+| `GET`, `DELETE .../truth-table/jobs/{jobId}`; `GET .../{jobId}/result` | A job's status and progress; cancel it or delete its result; download its rows as CSV or NDJSON (phase 10) |
 | `GET`, `POST /v1/circuits/{id}/shares`; `DELETE .../shares/{userId}` | Who it is shared with; share; stop sharing (phase 7) |
 | `POST /v1/auth/register`, `/login`, `/refresh`, `/logout`; `GET /v1/users/me` | Accounts and tokens (phase 7) |
 
 **Choice of methods:**
 - **`simulate` is `POST`.** It takes a body, and it records a simulation run.
 - **The truth table is `GET`.** It is a safe, cacheable read of rows that depend only on the circuit version.
+- **Starting a job is `POST`, answered with 202 Accepted.** It creates something (the job), and
+  the answer comes before the work is done: the job's URL in `Location`, and how soon to poll in
+  `Retry-After`. A `GET` must never start work, so the truth table's `GET` refuses a range too big
+  for one response rather than turning into a job.
 
 **Stored circuits may contain feedback loops.** A latch is valid structure. The summary reports the
 loop. Combinational simulation (the default) answers 422 `feedback-loop`; sequential simulation
@@ -97,13 +104,14 @@ away.
 | 403 | `forbidden`: you can see the circuit, but may not do this to it |
 | 404 | `not-found`, also for a circuit you may not see |
 | 406, 415 | `not-acceptable`, `unsupported-media-type` |
-| 409 | `version-conflict` (a truth-table page from a newer circuit version), `email-taken` |
+| 409 | `version-conflict` (a truth-table page from a newer circuit version, or a job whose circuit changed), `email-taken`, `job-unfinished` and `job-failed` (a job's result asked for when it has none) |
+| 410 | `result-gone`: a job's result has expired (after 24 hours) or was deleted |
 | 412 | `precondition-failed` (stale `If-Match`) |
 | 413 | `content-too-large` |
 | 422 | `invalid-circuit`, `invalid-netlist`, `invalid-inputs`, `feedback-loop`, `does-not-settle` (sequential mode), `too-many-inputs`, `computation-too-large`, `invalid-fields` (account and sharing bodies) |
-| 429 | `too-many-requests` (failed sign-ins), with `Retry-After` |
+| 429 | `too-many-requests` (failed sign-ins, or too many truth-table jobs), with `Retry-After` |
 | 500 | `internal-error`: the body never reveals details; the server logs them |
-| 503 | `server-busy` and `server-unavailable` (shutting down, or the database is unreachable), with `Retry-After`; `simulation-timeout` |
+| 503 | `server-busy` and `server-unavailable` (shutting down, or the database or Redis is unreachable), with `Retry-After`; `simulation-timeout` |
 
 **`toProblem(error)`** maps every error to its response. This covers the engine's errors, the
 netlist reader's, the worker pool's, cancellation, and unexpected bugs. It is the single mapping,
@@ -146,14 +154,21 @@ skipped.
 - **Version pin.** Every link carries `version`, so following links after the circuit has been
   edited answers 409 instead of silently mixing rows from two different circuits.
 - **Size limits.** JSON pages hold at most 4,096 rows. A CSV or NDJSON download holds at most
-  1,048,576 rows, and a range that is too big is refused rather than silently cut short. Larger
-  jobs belong to phase 10's background jobs.
+  1,048,576 rows, and a range that is too big is refused rather than silently cut short. A bigger
+  table is a background job (phase 10): up to 16,777,216 rows each, computed once and kept for a
+  day, then downloaded in the same CSV or NDJSON.
 
 ## Conditional requests
 
 Every circuit response carries `ETag: "<version>"`.
 - **`If-None-Match`** on reads answers 304 with no body when the client's copy is still current.
-  This saves bandwidth and prepares for caching (phase 10).
+  This saves bandwidth. For a truth-table page, the ETag comes from the circuit's access row alone,
+  so a 304 doesn't even load the circuit.
+
+**Caching (phase 10).** The server keeps simulation results and truth-table pages, keyed by the
+circuit's version: the same version that makes the ETags. A new version means new keys, so a
+cached answer can never be stale, and nothing has to be invalidated. `Cache-Status` (RFC 9211)
+says whether an answer came from the cache. See [caching-and-jobs.md](caching-and-jobs.md).
 - **`If-Match`** on `PUT`, `PATCH`, and `DELETE` answers 412 if the circuit changed since the client
   loaded it. When two people edit the same circuit, the second save no longer silently erases the
   first. Sharing arrives in phase 7, so this matters.
@@ -180,5 +195,5 @@ Simulations run on a fixed pool of worker threads (phase 2).
 | --- | --- |
 | 7 | Done: JWT authentication, `visibility`, and sharing, as planned. A circuit you may not see answers 404, not 403. See [auth-design.md](auth-design.md) |
 | 9 | Done: `mode` and `state` on `simulate`, `mode` on responses and recorded runs, and 422 `does-not-settle`. All additions: a client that never sends `mode` sees the same API, plus a `mode` field. See [design-patterns.md](design-patterns.md) |
-| 10 | Truth tables too large for one response as background jobs: `202 Accepted` with a job URL to poll. Also `Idempotency-Key` for safely retried POSTs, and 429 with `RateLimit` headers |
+| 10 | Done: truth tables too large for one response as background jobs (`202 Accepted`, a job URL to poll, 409 and 410 for results that aren't there), `Cache-Status` on cached answers, and 429 for too many jobs. Two items planned here moved: `Idempotency-Key` (a retried job request already gets the same job; other POSTs later) and API-wide rate limits with `RateLimit` headers (phase 12). See [caching-and-jobs.md](caching-and-jobs.md) |
 | 13 | Swagger UI serving `openapi.yaml`, and documentation pages at each problem `type` URL |

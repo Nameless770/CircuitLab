@@ -1,5 +1,5 @@
 import type { Circuit, ModeResult, SimulationInputs, SimulationMode, SimulationState, TruthTable } from "@circuitlab/engine";
-import { SimulationPool, type PoolStats } from "@circuitlab/runner";
+import { SimulationPool, type PackedTruthTable, type PoolStats } from "@circuitlab/runner";
 import { Injectable, Logger, type OnApplicationShutdown } from "@nestjs/common";
 import { AppConfig } from "../config/app-config";
 
@@ -39,6 +39,11 @@ export class SimulationPoolService implements OnApplicationShutdown {
   /** Pages computed in parallel on the workers and yielded in order; see SimulationPool.truthTablePages. */
   truthTablePages(circuit: Circuit, range: RowRange): AsyncGenerator<TruthTable, void, undefined> {
     return this.pool.truthTablePages(essentials(circuit), range);
+  }
+
+  /** The same, in the compact form pages travel in (for jobs, which store them as they are). */
+  packedTruthTablePages(circuit: Circuit, options: RowRange & { readonly pageSize: number; readonly signal: AbortSignal }): AsyncGenerator<PackedTruthTable, void, undefined> {
+    return this.pool.packedTruthTablePages(essentials(circuit), options);
   }
 
   get stats(): PoolStats & { readonly size: number } {

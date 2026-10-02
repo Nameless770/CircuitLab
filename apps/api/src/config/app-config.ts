@@ -22,6 +22,27 @@ export interface AppSettings {
    * API instances wouldn't accept each other's tokens.
    */
   readonly jwtSecret: string | undefined;
+  /**
+   * Redis connection string (redis:// or rediss://). `REDIS_URL`. With it, the result cache, the
+   * sign-in throttle, the job queue (BullMQ), and job results live in Redis, shared by every API
+   * instance and worker. Without it, they live in this process's memory.
+   */
+  readonly redisUrl: string | undefined;
+  /**
+   * A separate Redis for the cache. `REDIS_CACHE_URL`, default the same as REDIS_URL. Worth it in
+   * production: a cache should evict old entries when memory runs out (maxmemory-policy
+   * allkeys-lru), but the job queue must never lose a key (noeviction), and one Redis has one policy.
+   */
+  readonly redisCacheUrl: string | undefined;
+  /** Prefix of every Redis key, so several apps or test runs can share one Redis. `REDIS_PREFIX`, default "circuitlab". */
+  readonly redisPrefix: string;
+  /** How long results stay cached, in seconds; 0 turns the cache off. `CACHE_TTL_SECONDS`, default 3,600. */
+  readonly cacheTtlSeconds: number;
+  /**
+   * Truth-table jobs this process computes at once. `JOB_CONCURRENCY`, default 1. With Redis, 0
+   * makes an API-only instance, leaving the jobs to workers (`npm run start:worker`).
+   */
+  readonly jobConcurrency: number;
 }
 
 /**
@@ -38,6 +59,11 @@ export class AppConfig implements AppSettings {
   readonly databaseUrl: string | undefined;
   readonly databasePoolSize: number;
   readonly jwtSecret: string | undefined;
+  readonly redisUrl: string | undefined;
+  readonly redisCacheUrl: string | undefined;
+  readonly redisPrefix: string;
+  readonly cacheTtlSeconds: number;
+  readonly jobConcurrency: number;
 
   constructor(settings: Partial<AppSettings> = {}) {
     this.port = settings.port ?? 3000;
@@ -48,6 +74,11 @@ export class AppConfig implements AppSettings {
     this.databaseUrl = settings.databaseUrl;
     this.databasePoolSize = settings.databasePoolSize ?? 10;
     this.jwtSecret = settings.jwtSecret;
+    this.redisUrl = settings.redisUrl;
+    this.redisCacheUrl = settings.redisCacheUrl;
+    this.redisPrefix = settings.redisPrefix ?? "circuitlab";
+    this.cacheTtlSeconds = settings.cacheTtlSeconds ?? 3600;
+    this.jobConcurrency = settings.jobConcurrency ?? 1;
   }
 
   /** Reads the settings from environment variables, reporting every invalid one at once. */
@@ -61,15 +92,24 @@ export class AppConfig implements AppSettings {
       problems.push(`${name} must be a whole number of at least ${minimum}, got ${JSON.stringify(text)}`);
       return undefined;
     };
-    const postgresUrl = (name: string): string | undefined => {
+    const connectionString = (name: string, protocols: readonly string[]): string | undefined => {
       const text = env[name]?.trim();
       if (text === undefined || text === "") return undefined;
       try {
-        if (["postgres:", "postgresql:"].includes(new URL(text).protocol)) return text;
+        if (protocols.includes(new URL(text).protocol)) return text;
       } catch {
         // reported below
       }
-      problems.push(`${name} must be a postgresql:// connection string`); // never echo it: it may hold a password
+      problems.push(`${name} must be a ${protocols[0]}// connection string`); // never echo it: it may hold a password
+      return undefined;
+    };
+    const postgresUrl = (name: string): string | undefined => connectionString(name, ["postgresql:", "postgres:"]);
+    const redisUrl = (name: string): string | undefined => connectionString(name, ["redis:", "rediss:"]);
+    const prefix = (name: string): string | undefined => {
+      const text = env[name]?.trim();
+      if (text === undefined || text === "") return undefined;
+      if (/^[A-Za-z0-9_.-]{1,64}$/.test(text)) return text;
+      problems.push(`${name} may only hold letters, digits, "_", "." and "-" (at most 64), got ${JSON.stringify(text.slice(0, 80))}`);
       return undefined;
     };
     const secret = (name: string, minimum: number): string | undefined => {
@@ -88,7 +128,15 @@ export class AppConfig implements AppSettings {
       databaseUrl: postgresUrl("DATABASE_URL"),
       databasePoolSize: whole("DATABASE_POOL_SIZE", 1),
       jwtSecret: secret("JWT_SECRET", 32),
+      redisUrl: redisUrl("REDIS_URL"),
+      redisCacheUrl: redisUrl("REDIS_CACHE_URL"),
+      redisPrefix: prefix("REDIS_PREFIX"),
+      cacheTtlSeconds: whole("CACHE_TTL_SECONDS", 0),
+      jobConcurrency: whole("JOB_CONCURRENCY", 0),
     });
+    if (config.jobConcurrency === 0 && config.redisUrl === undefined) {
+      problems.push("JOB_CONCURRENCY=0 needs REDIS_URL: without Redis, jobs can only run in this process");
+    }
     if (problems.length > 0) throw new StartupError(`Invalid configuration:\n  - ${problems.join("\n  - ")}`);
     return config;
   }

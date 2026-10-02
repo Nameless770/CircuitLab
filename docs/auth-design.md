@@ -66,8 +66,12 @@ circuit with Bob, Bob loses access on his next request, not when his token expir
   for 15 minutes.
   - **Keyed by account and address together**, so an attacker can't lock someone out by failing
     sign-ins for their account from elsewhere.
-  - **Bounded:** the table has at most 100,000 entries. Phase 8's tests caught a slowdown once it
-    was full; see [testing.md](testing.md).
+  - **Shared by every API instance (phase 10).** The counts are in Redis, so an attacker can't make
+    5 guesses on each instance. A Lua script counts each failure atomically; keys are hashed, so
+    addresses aren't stored as they are. When Redis is down, sign-in answers 503 rather than
+    skipping the throttle. See [caching-and-jobs.md](caching-and-jobs.md).
+  - **Without Redis**, the counts are kept in the process's memory, at most 100,000 entries. Phase
+    8's tests caught a slowdown once that table was full; see [testing.md](testing.md).
 
 ## Tokens
 
@@ -125,13 +129,17 @@ The migration `20261001210000_accounts_and_sharing` adds:
 
 The in-memory storage follows the same rules, and the same integration tests run against both.
 
+## Done in phase 10
+
+- **The throttle is shared by every API instance,** in Redis (above).
+- **Expired sessions are deleted on a schedule:** housekeeping runs `delete_expired_sessions` every
+  10 minutes (a BullMQ job scheduler; a timer without Redis).
+
 ## Not done yet
 
 | What | When |
 | --- | --- |
 | Email verification, password reset, changing a password, "sign out everywhere" | Not on the roadmap yet; the `sessions` table already supports the last |
-| Rate limits shared by several API instances (the throttle is in memory, per process) | Phase 10, in Redis |
 | `trust proxy`, so the throttle sees the client's address rather than the reverse proxy's | Phase 11 |
-| Deleting expired sessions on a schedule (`delete_expired_sessions` in queries.sql) | Phase 10's job queue |
 | A grace period for two browser tabs refreshing the same token at the same moment (today the second one ends the session) | If it bothers users |
 | A list of common passwords to refuse, as NIST also asks | With the account settings above |

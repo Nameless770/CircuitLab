@@ -14,4 +14,7 @@ export abstract class SessionsRepository {
   abstract rotate(sessionId: string, secretHash: Buffer, newSecretHash: Buffer, now: Date, expiresAt: Date): Promise<string | undefined>;
 
   abstract delete(sessionId: string): Promise<void>;
+
+  /** Housekeeping: deletes every session that expired by `now`. Returns how many. */
+  abstract deleteExpired(now: Date): Promise<number>;
 }

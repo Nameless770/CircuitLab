@@ -20,14 +20,17 @@
     "demo:api": "npm run build && node examples/dist/api-demo.js",
     "lint:api": "npm run lint:spec -w @circuitlab/api-contract",
     "start:api": "npm run build && node --env-file-if-exists=.env apps/api/dist/main.js",
+    "start:worker": "npm run build && node --env-file-if-exists=.env apps/api/dist/worker.js",
     "demo:http": "npm run build && node examples/dist/http-demo.js",
     "demo:auth": "npm run build && node examples/dist/auth-demo.js",
     "demo:patterns": "npm run build && node examples/dist/patterns-demo.js",
+    "demo:jobs": "npm run build && node --env-file-if-exists=.env examples/dist/jobs-demo.js",
     "db:check": "npm run build && node packages/database/dist/check-schema.js",
     "db:start": "npm run build && npm run start -w @circuitlab/database",
     "db:migrate": "npm run migrate -w @circuitlab/database",
     "db:status": "npm run migrate:status -w @circuitlab/database",
-    "db:studio": "npm run studio -w @circuitlab/database"
+    "db:studio": "npm run studio -w @circuitlab/database",
+    "redis:start": "docker run --rm --name circuitlab-redis -p 6379:6379 redis:8-alpine"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "~5.0.3",

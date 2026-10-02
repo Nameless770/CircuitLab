@@ -12,9 +12,11 @@
  *    down to their truth tables. Replacing one must leave exactly the replacement.
  * 4. Shows optimistic locking turning away a write based on an old version.
  * 5. Accounts, sharing, simulation history, and sessions, through their queries.
- * 6. Pages through circuits created within one millisecond, with cursors holding JavaScript dates.
- * 7. Fills the tables with 1,000 users and 50,000 circuits and shows the query plans using the
- *    indexes.
+ * 6. Truth-table jobs: the allowance, an identical request getting the same job, and status
+ *    changes that only move forward (compare-and-swap).
+ * 7. Pages through circuits created within one millisecond, with cursors holding JavaScript dates.
+ * 8. Fills the tables with 1,000 users, 50,000 circuits and 60,000 runs, and shows the query plans
+ *    using the indexes.
  *
  * Every named query in queries.sql runs at least once; the check fails otherwise.
  */
@@ -365,6 +367,7 @@ async function constraints(): Promise<void> {
     ["A truth-table run without a range", runRow, ["truth_table", "queued", null, null, null, null, null, null], "simulation_runs_kind_fields"],
     ["A succeeded simulate run without outputs", runRow, ["simulate", "succeeded", { A: 1 }, null, null, null, before, now], "simulation_runs_status_fields"],
     ["A queued run that has already started", runRow, ["truth_table", "queued", null, null, 0, 10, before, null], "simulation_runs_status_fields"],
+    ["A cancelled job without a finish time", runRow, ["truth_table", "cancelled", null, null, 0, 10, null, null], "simulation_runs_status_fields"],
     ["A run that finished before it started", runRow, ["truth_table", "failed", null, null, 0, 10, now, before], "simulation_runs_finished_after_started"],
     ["A sequential truth table", `INSERT INTO simulation_runs (circuit_id, circuit_version, kind, mode, status, row_offset, row_limit) VALUES ('${c1}', 1, 'truth_table', 'sequential', 'queued', 0, 10)`, [], "simulation_runs_truth_tables_combinational"],
   ];
@@ -570,7 +573,98 @@ async function accountsAndSharing(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 6. Cursors and timestamp precision
+// 6. Truth-table jobs
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A job is a truth_table run whose status only moves forward. Starting one is a transaction
+ * (lock, allowance, then insert, as the API does it), and every later change is a compare-and-swap
+ * on the status: of a cancellation and a finishing worker, exactly one wins.
+ */
+async function jobs(): Promise<void> {
+  section("6. Truth-table jobs: allowance, retries, and racing status changes");
+  const lea = await createUser("lea@example.com", "Lea");
+  const max = await createUser("max@example.com", "Max");
+  const id = await storeCircuit(
+    { gates: [{ id: "A", type: "INPUT" }, { id: "B", type: "INPUT" }, { id: "x", type: "XOR" }, { id: "Y", type: "OUTPUT" }], wires: [{ from: "A", to: "x", toPin: 0 }, { from: "B", to: "x", toPin: 1 }, { from: "x", to: "Y", toPin: 0 }] },
+    "Lea's XOR",
+    lea,
+  );
+  const now = new Date("2026-10-01T12:00:00Z");
+  const at = (minutes: number): Date => new Date(now.getTime() + minutes * 60_000);
+  type Allowance = { started: number; unfinished: number; oldest: Date | null };
+
+  /** What the API does when Lea asks for rows offset..offset+limit-1: the same request twice gets the same job. */
+  const start = (offset: number, limit: number, when: Date): Promise<{ id: string; existing: boolean; allowance: Allowance }> =>
+    db.transaction(async (tx) => {
+      await tx.query(sql("lock_user_jobs"), [lea]);
+      const allowance = (await tx.query<Allowance>(sql("job_allowance"), [lea, new Date(when.getTime() - DAY)])).rows[0] ?? { started: 0, unfinished: 0, oldest: null };
+      const same = (await tx.query<{ id: string }>(sql("identical_unfinished_job"), [lea, id, 1, offset, limit])).rows[0];
+      if (same !== undefined) return { id: same.id, existing: true, allowance };
+      const created = (await tx.query<{ id: string }>(sql("insert_job"), [id, 1, lea, offset, limit, when])).rows[0];
+      assert.ok(created !== undefined);
+      return { id: created.id, existing: false, allowance };
+    });
+
+  const first = await start(0, 4, at(0));
+  const again = await start(0, 4, at(1));
+  assert.deepEqual([again.id, again.existing], [first.id, true]);
+  print("Lea starts a job for rows 0-3, then sends the same request again (say her first answer was lost):");
+  print("the second finds the first job still queued, and gets it back. One job, not two.");
+  const second = await start(2, 2, at(2));
+  assert.deepEqual([Number(second.allowance.started), Number(second.allowance.unfinished)], [1, 1]);
+  const third = await db.query<Allowance>(sql("job_allowance"), [lea, new Date(at(3).getTime() - DAY)]);
+  assert.equal(Number(third.rows[0]?.unfinished), 2);
+  print(`A job for rows 2-3 is new. Now job_allowance says ${third.rows[0]?.unfinished} unfinished: a third would be refused (429).`);
+
+  // A worker takes the first job. A retry after a failed attempt starts it again; that's allowed.
+  const started = (await run<{ row_offset: string; row_limit: number }>("start_job", [first.id, at(4)])).rows[0];
+  assert.deepEqual([Number(started?.row_offset), started?.row_limit], [0, 4]);
+  assert.equal((await run("start_job", [first.id, at(5)])).rows.length, 1);
+  const status = (await run<{ status: string }>("job_status", [first.id])).rows[0]?.status;
+  assert.equal(status, "running");
+  print(`\nA worker starts the first job (start_job), and once more as a retry: status ${status}.`);
+
+  // Lea cancels the second while it waits; a worker that took it anyway can no longer finish it.
+  const cancelled = await run("cancel_job", [second.id, at(6)]);
+  const lateStart = await run("start_job", [second.id, at(7)]);
+  const lateFinish = await run("complete_job", [second.id, at(8)]);
+  assert.deepEqual([cancelled.rows.length, lateStart.rows.length, lateFinish.rows.length], [1, 0, 0]);
+  print("Lea cancels the second (cancel_job: 1 row). A worker asking for it afterwards gets nothing back (start_job: 0 rows),");
+  print("and neither can it be completed (complete_job: 0 rows): its status only moves forward.");
+
+  // The first finishes; cancelling it afterwards changes nothing, and failing it neither.
+  const completed = await run("complete_job", [first.id, at(9)]);
+  const tooLate = [(await run("cancel_job", [first.id, at(10)])).rows.length, (await run("fail_job", [first.id, at(10), "internal-error"])).rows.length];
+  assert.deepEqual([completed.rows.length, ...tooLate], [1, 0, 0]);
+  print("The first succeeds (complete_job: 1 row); a cancellation or failure arriving later changes 0 rows.");
+
+  const hers = (await run<{ status: string; row_limit: number }>("get_job", [first.id, id, lea])).rows[0];
+  const notHis = (await run("get_job", [first.id, id, max])).rows.length;
+  assert.deepEqual([hers?.status, notHis], ["succeeded", 0]);
+  print(`get_job: Lea sees her job (${hers?.status}); Max, asking for the same id, gets nothing.`);
+  const history = (await run<{ kind: string; status: string; row_offset: string | null; row_limit: number | null }>("recent_runs", [id, 10])).rows;
+  print(`The circuit's history (recent_runs): ${history.map((row) => `${row.kind} ${row.status} rows ${row.row_offset}+${row.row_limit}`).join("; ")}`);
+
+  // A job that couldn't be queued is forgotten, but only while no worker has touched it.
+  const unqueued = (await db.query<{ id: string }>(sql("insert_job"), [id, 1, lea, 0, 2, at(11)])).rows[0]?.id;
+  const discarded = await run("discard_job", [unqueued]);
+  const notStarted = await run("discard_job", [first.id]);
+  assert.deepEqual([discarded.affectedRows, notStarted.affectedRows], [1, 0]);
+  print("A job Redis couldn't take is forgotten (discard_job: 1 row); one a worker already ran is not (0 rows).");
+
+  // Housekeeping: a job left unfinished for over an hour has been lost, and is failed.
+  const lost = (await db.query<{ id: string }>(sql("insert_job"), [id, 1, lea, 0, 1, at(-120)])).rows[0]?.id;
+  const failed = await run<{ id: string }>("fail_abandoned_jobs", [now, at(-60)]);
+  assert.deepEqual(failed.rows.map((row) => row.id), [lost]);
+  const failedJob = (await run<{ status: string; error_code: string }>("get_job", [lost, id, lea])).rows[0];
+  print(`\nHousekeeping (fail_abandoned_jobs): a job queued two hours ago and never run becomes ${failedJob?.status} (${failedJob?.error_code}).`);
+  const allowance = (await run<Allowance>("job_allowance", [lea, new Date(now.getTime() - DAY)])).rows[0];
+  print(`Lea's allowance now: ${allowance?.started} jobs started in the last 24 hours, ${allowance?.unfinished} unfinished.`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// 7. Cursors and timestamp precision
 // ---------------------------------------------------------------------------------------------
 
 /**
@@ -580,7 +674,7 @@ async function accountsAndSharing(): Promise<void> {
  * (fixed by the millisecond_timestamps migration). Pages of one circuit must show all three.
  */
 async function cursorPrecision(): Promise<void> {
-  section("6. Cursors: three circuits created within one millisecond");
+  section("7. Cursors: three circuits created within one millisecond");
   const owner = await createUser("mia@example.com", "Mia");
   const names = ["first", "second", "third"];
   await db.query(
@@ -607,11 +701,11 @@ async function cursorPrecision(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 7. Indexes
+// 8. Indexes
 // ---------------------------------------------------------------------------------------------
 
 async function indexes(): Promise<void> {
-  section("7. Indexes at work: 1,000 users, 50,000 circuits (a quarter public), 500,000 gates");
+  section("8. Indexes at work: 1,000 users, 50,000 circuits (a quarter public), 500,000 gates, 60,000 runs");
   // User n gets the id user(n), so each circuit's owner is computed rather than looked up.
   //
   // The ANALYZEs between the inserts matter: without the one on `circuits`, these inserts took over
@@ -642,6 +736,18 @@ async function indexes(): Promise<void> {
       WHERE c.visibility = 'private' AND c.owner_id BETWEEN ${user("1")} AND ${user("1000")}
     ) AS p
     WHERE p.k % 4 = 0 AND p.owner_id <> ${user("p.k % 1000 + 1")};
+    -- 60,000 runs: simulations by everyone, and 2,000 truth-table jobs (the 10 newest unfinished).
+    INSERT INTO simulation_runs (circuit_id, circuit_version, user_id, kind, status, inputs, outputs, row_offset, row_limit, created_at, started_at, finished_at)
+    SELECT c.id, 1, c.owner_id,
+           CASE WHEN n % 30 = 0 THEN 'truth_table' ELSE 'simulate' END::run_kind,
+           CASE WHEN n % 30 = 0 AND n > 59700 THEN 'queued' ELSE 'succeeded' END::run_status,
+           CASE WHEN n % 30 = 0 THEN NULL ELSE '{"A": 1, "B": 0}'::jsonb END,
+           CASE WHEN n % 30 = 0 THEN NULL ELSE '{"Y": 1}'::jsonb END,
+           CASE WHEN n % 30 = 0 THEN 0 END, CASE WHEN n % 30 = 0 THEN 4 END,
+           t.at, CASE WHEN n % 30 = 0 AND n > 59700 THEN NULL ELSE t.at END, CASE WHEN n % 30 = 0 AND n > 59700 THEN NULL ELSE t.at END
+    FROM generate_series(1, 60000) AS n
+    JOIN LATERAL (SELECT id, owner_id FROM circuits WHERE owner_id = ${user("n % 1000 + 1")} LIMIT 1) AS c ON true,
+    LATERAL (SELECT timestamptz '2026-09-01' + n * interval '30 seconds' AS at) AS t;
     ANALYZE;
   `);
   const shares = Number((await db.query<{ n: number }>("SELECT count(*) AS n FROM circuit_shares")).rows[0]?.n);
@@ -684,6 +790,12 @@ async function indexes(): Promise<void> {
   await show("Circuits shared with someone (list_shared_with)", sql("list_shared_with"), [21, someone]);
   await show("Name search among public circuits, q=12345 (search_public_by_name)", sql("search_public_by_name"), [21, "12345"]);
   await show("A circuit's gates in order (get_gates)", sql("get_gates"), [anyCircuit]);
+  const jobOwner = "00000000-0000-7000-8000-000000000001";
+  await show("Someone's jobs in the last 24 hours (job_allowance)", sql("job_allowance"), [jobOwner, new Date("2026-09-20T00:00:00Z")]);
+  await show("Jobs unfinished for over an hour (fail_abandoned_jobs)", sql("fail_abandoned_jobs"), [
+    new Date("2026-10-01T00:00:00Z"),
+    new Date("2026-09-30T23:00:00Z"),
+  ]);
   print(`\nThe cursor reads 21 rows from the index; OFFSET reads and throws away 10,000 first (${(offset / keyset).toFixed(0)}x slower here).`);
 }
 
@@ -695,6 +807,7 @@ async function main(): Promise<void> {
     await roundTrip();
     await optimisticLocking();
     await accountsAndSharing();
+    await jobs();
     await cursorPrecision();
     await indexes();
     const unused = [...QUERIES.keys()].filter((name) => !used.has(name));

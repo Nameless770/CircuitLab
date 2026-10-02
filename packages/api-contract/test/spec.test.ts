@@ -25,6 +25,17 @@ describe("openapi.yaml and the code agree", () => {
     expect(parameters.ListScope.schema.enum).toEqual(["owned", "shared", "public"]);
   });
 
+  it("on the truth-table job limits, which the job description states in words", () => {
+    // Words wrap differently in YAML, so compare with every run of white space as one space.
+    const description = String(spec.paths["/circuits/{circuitId}/truth-table/jobs"]?.post?.description).replace(/\s+/g, " ");
+    const { maxRows, maxGateEvaluations, maxResultBits, resultHours, activePerUser, perUserPerDay } = LIMITS.truthTableJobs;
+    for (const limit of [maxRows, maxGateEvaluations, maxResultBits]) expect(description).toContain(limit.toLocaleString("en"));
+    expect(description).toContain(`${resultHours} hours`);
+    expect(description).toContain(`${activePerUser} jobs waiting or running`);
+    expect(description).toContain(`${perUserPerDay} jobs in any 24 hours`);
+    expect(schemas.TruthTableJob.properties.status).toEqual(schemas.SimulationRun.properties.status);
+  });
+
   it("on the password rules", () => {
     expect(schemas.Password).toMatchObject({ minLength: LIMITS.password.minLength, maxLength: LIMITS.password.maxLength });
     expect(schemas.SignInRequest.properties.password.maxLength).toBe(LIMITS.password.maxLength);
@@ -44,7 +55,21 @@ describe("openapi.yaml and the code agree", () => {
       .map((operation) => operation.id)
       .sort();
     expect(needsToken).toEqual(
-      ["createCircuit", "deleteCircuit", "getCurrentUser", "listRuns", "listShares", "replaceCircuit", "shareCircuit", "unshareCircuit", "updateCircuitMetadata"].sort(),
+      [
+        "createCircuit",
+        "createTruthTableJob",
+        "deleteCircuit",
+        "deleteTruthTableJob",
+        "getCurrentUser",
+        "getTruthTableJob",
+        "getTruthTableJobResult",
+        "listRuns",
+        "listShares",
+        "replaceCircuit",
+        "shareCircuit",
+        "unshareCircuit",
+        "updateCircuitMetadata",
+      ].sort(),
     );
   });
 

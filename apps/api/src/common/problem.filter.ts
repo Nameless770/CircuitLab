@@ -1,8 +1,8 @@
-import { ApiError, LIMITS, toProblem } from "@circuitlab/api-contract";
+import { ApiError, toProblem } from "@circuitlab/api-contract";
 import { Catch, HttpException, Logger } from "@nestjs/common";
 import type { ArgumentsHost, ExceptionFilter } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { isDatabaseUnavailable } from "../storage/database-errors";
+import { outageAsProblem } from "./outages";
 
 /**
  * Every error, from any layer, leaves the API through here as an RFC 9457 problem document. The
@@ -46,12 +46,11 @@ function translate(exception: unknown, method: string, path: string): unknown {
   const code = (exception as { code?: unknown } | null)?.code;
   if (code === "ECONNRESET" || code === "ERR_STREAM_PREMATURE_CLOSE") return new DOMException("The client disconnected", "AbortError");
 
-  // The database is down or out of connections: worth retrying, and not a bug in the API.
-  if (isDatabaseUnavailable(exception)) {
-    return new ApiError("server-unavailable", "The database is unavailable. Try again shortly.", {
-      headers: { "Retry-After": String(LIMITS.retryAfterSeconds.unavailable) },
-    });
-  }
+  // The database or Redis is down (or out of connections): worth retrying, and not a bug in the
+  // API. Redis is needed by the job queue, job results, and the sign-in throttle; the cache isn't,
+  // since its failures are treated as misses.
+  const outage = outageAsProblem(exception);
+  if (outage !== exception) return outage;
 
   // Nest's own HTTP exceptions: the 404 for a path no controller handles, and the 400 for a path
   // with broken percent-encoding such as "%FF".

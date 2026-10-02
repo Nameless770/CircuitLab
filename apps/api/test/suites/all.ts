@@ -1,22 +1,28 @@
 import { allOperations } from "@circuitlab/api-contract";
 import { describe, expect, it } from "vitest";
-import { useServer, type Storage } from "../support/server";
+import { useServer, type Setup } from "../support/server";
 import { accessSuite } from "./access";
 import { accountsSuite } from "./accounts";
+import { cachingSuite } from "./caching";
 import { circuitsSuite } from "./circuits";
+import { jobsSuite } from "./jobs";
 import { sharingSuite } from "./sharing";
 import { sequentialSuite } from "./sequential";
 import { simulationSuite } from "./simulation";
 
-/** The whole API, over HTTP, against one kind of storage. */
-export function describeApi(storage: Storage): void {
-  const context = useServer(storage);
+/** The whole API, over HTTP, in one setup (memory, or PostgreSQL and Redis). */
+export function describeApi(setup: Setup): void {
+  const context = useServer(setup);
 
   describe("the server", () => {
-    it("reports its health and its storage", async () => {
+    it("reports its health, its storage, and where its cache and jobs live", async () => {
       const reply = await context().api.get("/health");
       expect(reply.status).toBe(200);
-      expect(reply.body).toMatchObject({ status: "ok", storage: { kind: storage } });
+      expect(reply.body).toMatchObject({
+        status: "ok",
+        storage: setup.storage === "memory" ? { kind: "memory" } : { kind: "postgresql", reachable: true },
+        redis: setup.redis ? { kind: "redis", reachable: true } : { kind: "memory" },
+      });
     });
 
     it("answers an unknown path with a problem document", async () => {
@@ -31,6 +37,8 @@ export function describeApi(storage: Storage): void {
   simulationSuite(context);
   sequentialSuite(context);
   sharingSuite(context);
+  cachingSuite(context);
+  jobsSuite(context);
 
   // Last: every operation in openapi.yaml was called at least once with a success status.
   it("exercises every operation in openapi.yaml", () => {

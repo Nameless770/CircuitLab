@@ -128,6 +128,15 @@ export class SimulationPool {
    *   for await (const page of pool.truthTablePages(circuit)) sendToClient(page.rows);
    */
   async *truthTablePages(circuit: unknown, options: PageOptions = {}): AsyncGenerator<TruthTable, void, undefined> {
+    for await (const page of this.packedTruthTablePages(circuit, options)) yield unpack(page);
+  }
+
+  /**
+   * `truthTablePages`, but each page stays in the compact form it travels in between threads:
+   * inputs implicit in the row numbers, outputs one byte each. For callers that store or re-encode
+   * the rows themselves (background jobs), which then never build millions of row objects.
+   */
+  async *packedTruthTablePages(circuit: unknown, options: PageOptions = {}): AsyncGenerator<PackedTruthTable, void, undefined> {
     const pageSize = positiveInteger("pageSize", options.pageSize ?? 1024);
     const start = positiveInteger("offset", options.offset ?? 0, 0);
     const wanted = positiveInteger("limit", options.limit ?? Number.MAX_SAFE_INTEGER, 0);
@@ -149,14 +158,14 @@ export class SimulationPool {
     };
     try {
       requestMore();
-      yield unpack(first);
+      yield first;
       for (let current = ahead.shift(); current !== undefined; current = ahead.shift()) {
         const result = await current;
         requestMore();
         // Several pages often finish together. Without this, the consumer would process them all
         // in one go (resolved promises chain as microtasks), and timers and I/O would wait.
         await setImmediate();
-        yield unpack(result);
+        yield result;
       }
     } finally {
       // Runs on normal completion, on error, and when the consumer breaks out of its loop.

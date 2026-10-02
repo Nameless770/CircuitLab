@@ -31,4 +31,10 @@ export class InMemorySessionsRepository extends SessionsRepository {
   async delete(sessionId: string): Promise<void> {
     this.sessions.delete(sessionId);
   }
+
+  async deleteExpired(now: Date): Promise<number> {
+    const before = this.sessions.size;
+    for (const [id, session] of this.sessions) if (session.expiresAt <= now) this.sessions.delete(id);
+    return before - this.sessions.size;
+  }
 }

@@ -6,7 +6,7 @@ import { accessOf, allows, denied, type AccessFacts, type CircuitAccess, type Ci
 import { AppConfig } from "../../dist/config/app-config";
 import { PasswordsService } from "../../dist/auth/passwords.service";
 import { formatRefreshToken, hashSecret, newSecret, parseRefreshToken } from "../../dist/auth/refresh-tokens";
-import { SignInThrottle } from "../../dist/auth/sign-in-throttle";
+import { InMemorySignInThrottle } from "../../dist/redis/in-memory-sign-in-throttle";
 import { isDatabaseUnavailable } from "../../dist/storage/database-errors";
 import { FakeClock, MINUTE } from "../support/clock";
 
@@ -44,44 +44,37 @@ describe("circuit access", () => {
   });
 });
 
-describe("sign-in throttle", () => {
+describe("sign-in throttle, in memory (the Redis one is tested against Redis, in the API suites)", () => {
   const window = LIMITS.signIn.windowSeconds * 1000;
 
-  it(`blocks a key after ${LIMITS.signIn.maxFailures} failures, until the window since the first failure ends`, () => {
+  it(`blocks a key after ${LIMITS.signIn.maxFailures} failures, until the window since the first failure ends`, async () => {
     const clock = new FakeClock();
-    const throttle = new SignInThrottle(clock);
+    const throttle = new InMemorySignInThrottle(clock);
     for (let failure = 0; failure < LIMITS.signIn.maxFailures; failure++) {
-      expect(() => throttle.check("ada")).not.toThrow();
-      throttle.failed("ada");
+      await expect(throttle.check("ada")).resolves.toBeUndefined();
+      await throttle.failed("ada");
     }
     clock.advance(MINUTE);
-    const blocked = toProblem((() => {
-      try {
-        throttle.check("ada");
-      } catch (error) {
-        return error;
-      }
-      return undefined;
-    })());
+    const blocked = toProblem(await throttle.check("ada").catch((error: unknown) => error));
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers["Retry-After"])).toBe((window - MINUTE) / 1000);
-    expect(() => throttle.check("bob")).not.toThrow(); // other keys are unaffected
+    await expect(throttle.check("bob")).resolves.toBeUndefined(); // other keys are unaffected
     clock.advance(window - MINUTE);
-    expect(() => throttle.check("ada")).not.toThrow(); // the window is over
+    await expect(throttle.check("ada")).resolves.toBeUndefined(); // the window is over
   });
 
-  it("forgets the failures after a successful sign-in", () => {
-    const throttle = new SignInThrottle(new FakeClock());
-    for (let failure = 0; failure < LIMITS.signIn.maxFailures - 1; failure++) throttle.failed("ada");
-    throttle.succeeded("ada");
-    throttle.failed("ada");
-    expect(() => throttle.check("ada")).not.toThrow();
+  it("forgets the failures after a successful sign-in", async () => {
+    const throttle = new InMemorySignInThrottle(new FakeClock());
+    for (let failure = 0; failure < LIMITS.signIn.maxFailures - 1; failure++) await throttle.failed("ada");
+    await throttle.succeeded("ada");
+    await throttle.failed("ada");
+    await expect(throttle.check("ada")).resolves.toBeUndefined();
   });
 
-  it("stays bounded in memory, and fast, however many keys an attacker invents", () => {
-    const throttle = new SignInThrottle(new FakeClock());
+  it("stays bounded in memory, and fast, however many keys an attacker invents", async () => {
+    const throttle = new InMemorySignInThrottle(new FakeClock());
     const started = performance.now();
-    for (let key = 0; key < 300_000; key++) throttle.failed(`key ${key}`);
+    for (let key = 0; key < 300_000; key++) await throttle.failed(`key ${key}`);
     // About a second normally. Pruning on every failure once full made this quadratic: minutes. The
     // limit sits far from both, so a busy machine doesn't fail the test and the bug still would.
     expect(performance.now() - started).toBeLessThan(15_000);

@@ -143,6 +143,18 @@ as an argument, so tests use a tiny budget to provoke oscillation, and the defau
 | Single source of truth | `openapi.yaml` (phase 3), `LIMITS`, the gate registry | One definition, enforced and documented from the same place; tests compare any copy with it |
 | Policy as data | `circuit-access.ts`: the table of who may do what (phase 7) | The rules can be read, reviewed, and tested as the table they are |
 
+## Patterns phase 10 added
+
+Explained in [caching-and-jobs.md](caching-and-jobs.md):
+
+| Pattern | Where | Why |
+| --- | --- | --- |
+| Cache-aside, with versioned keys | `SimulationService` and `ResultCache` | The service fills the cache. The circuit version in every key means nothing ever has to be invalidated |
+| Asynchronous request-reply | `POST .../truth-table/jobs`: 202, a URL to poll, a result URL | Long work without holding a request open |
+| Producer and consumer | `BullMqJobQueue` (API instances) and `BullMqJobWorkers` (any process) | Each side scales on its own |
+| Compare-and-swap state machine | `JobsRepository`: every status change says which statuses it expects | Racing changes (cancel against finish) have exactly one winner |
+| The same injection, for Redis | `RedisModule` and `JobsModule` bind the cache, throttle, results, and queue to Redis or memory | As `StorageModule` does for PostgreSQL: no service knows which it got |
+
 ## Patterns left out on purpose
 
 - **A class per gate type.** Gates are data that cross JSON, the database, and threads; see

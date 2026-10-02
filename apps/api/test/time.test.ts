@@ -4,11 +4,13 @@
 import { LIMITS } from "@circuitlab/api-contract";
 import { describe, expect, it } from "vitest";
 import { DAY, FakeClock, MINUTE } from "./support/clock";
-import { register, useServer, type Storage } from "./support/server";
+import { Housekeeping } from "../dist/jobs/housekeeping.service";
+import { JobsRepository } from "../dist/jobs/jobs.repository";
+import { SETUPS, createCircuit, describeSetup, finishedJob, refresh, register, useServer } from "./support/server";
 
-describe.each<Storage>(["memory", "postgresql"])("time-dependent rules (%s)", (storage) => {
+describe.each(SETUPS.map((setup) => ({ ...setup, name: describeSetup(setup) })))("time-dependent rules ($name)", (setup) => {
   const clock = new FakeClock();
-  const context = useServer(storage, { clock });
+  const context = useServer(setup, { clock });
 
   it(`expires an access token after ${LIMITS.accessTokenSeconds / 60} minutes; the refresh token gets a new one`, async () => {
     const { api } = context();
@@ -68,5 +70,69 @@ describe.each<Storage>(["memory", "postgresql"])("time-dependent rules (%s)", (s
     await api.post(`/v1/circuits/${created.body.id}/simulate`, { as: ada, json: { inputs: { A: 1 } } });
     const [run] = (await api.get(`/v1/circuits/${created.body.id}/runs`, { as: ada })).body.items;
     expect(run.createdAt).toBe(clock.now().toISOString());
+  });
+
+  it(`keeps a job's result for ${LIMITS.truthTableJobs.resultHours} hours, then answers 410`, async () => {
+    const { api } = context();
+    const ada = await register(api, "Ada");
+    const id = await createCircuit(api, ada);
+    const started = await api.post(`/v1/circuits/${id}/truth-table/jobs`, { as: ada, json: {} });
+    const done = await finishedJob(api, ada, started.body.links.self);
+    const hours = LIMITS.truthTableJobs.resultHours;
+    expect(done.expiresAt).toBe(new Date(clock.now().getTime() + hours * 60 * MINUTE).toISOString());
+
+    clock.advance(hours * 60 * MINUTE - MINUTE);
+    await refresh(api, ada);
+    expect((await api.get(started.body.links.self, { as: ada })).body.links.result).toBeDefined();
+    expect((await api.get(`${started.body.links.self}/result`, { as: ada })).status).toBe(200);
+    clock.advance(MINUTE);
+    expect((await api.get(started.body.links.self, { as: ada })).body.links.result).toBeUndefined();
+    const gone = await api.get(`${started.body.links.self}/result`, { as: ada });
+    expect([gone.status, gone.body.code]).toEqual([410, "result-gone"]);
+  });
+
+  it(`allows ${LIMITS.truthTableJobs.perUserPerDay} jobs in any 24 hours, and says when the next one may start`, async () => {
+    const { api } = context();
+    const ada = await register(api, "Ada");
+    const id = await createCircuit(api, ada);
+    const start = () => api.post(`/v1/circuits/${id}/truth-table/jobs`, { as: ada, json: {} });
+    const { perUserPerDay } = LIMITS.truthTableJobs;
+    for (let n = 0; n < perUserPerDay; n++) {
+      const job = await start();
+      expect(job.status, `job ${n + 1}`).toBe(202);
+      await finishedJob(api, ada, job.body.links.self);
+      clock.advance(MINUTE / 2);
+    }
+    const refused = await start();
+    expect([refused.status, refused.body.detail]).toEqual([429, `You have started ${perUserPerDay} jobs in the last 24 hours, the most allowed.`]);
+    // The oldest started 24 hours before the allowance grows again.
+    const wait = 24 * 60 * 60 - (perUserPerDay * MINUTE) / 2 / 1000;
+    expect(refused.headers.get("retry-after")).toBe(String(wait));
+    clock.advance(wait * 1000 - 1000);
+    await refresh(api, ada);
+    expect((await start()).status).toBe(429);
+    clock.advance(1000);
+    expect((await start()).status).toBe(202);
+  });
+
+  it("cleans up on schedule: a lost job is failed, and expired sessions are deleted", async () => {
+    const { api, app } = context();
+    const ada = await register(api, "Ada");
+    const id = await createCircuit(api, ada);
+    // A job no queue will ever run, as if Redis had lost it.
+    const { job } = await app.get(JobsRepository, { strict: false }).create({ circuitId: id, circuitVersion: 1, userId: ada.id, offset: 0, limit: 4, createdAt: clock.now() }, () => {});
+    const housekeeping = app.get(Housekeeping, { strict: false });
+    await housekeeping.run();
+    const url = `/v1/circuits/${id}/truth-table/jobs/${job.id}`;
+    expect((await api.get(url, { as: ada })).body.status).toBe("queued"); // not lost yet: only waiting
+
+    clock.advance(61 * MINUTE);
+    await refresh(api, ada);
+    expect((await housekeeping.run()).abandonedJobs).toBeGreaterThanOrEqual(1);
+    expect((await api.get(url, { as: ada })).body).toMatchObject({ status: "failed", errorCode: "internal-error" });
+
+    clock.advance(LIMITS.sessionDays * DAY);
+    expect((await housekeeping.run()).expiredSessions).toBeGreaterThanOrEqual(1);
+    expect((await api.post("/v1/auth/refresh", { json: { refreshToken: ada.refreshToken } })).status).toBe(401);
   });
 });

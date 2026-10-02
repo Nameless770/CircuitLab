@@ -29,6 +29,12 @@ info:
       412 instead of silently overwriting their work.
     - **Overload.** Simulations run on a fixed pool of worker threads. When every worker is busy and
       the waiting line is full, the API answers 503 with `Retry-After` rather than queueing forever.
+    - **Background jobs.** A truth table too big for one response is computed by a job: start it
+      with `POST`, which answers 202 with the job's URL in `Location`, poll that URL until the
+      job's `status` is `succeeded`, then download its `links.result`.
+    - **Caching.** Simulation results and truth-table pages are cached per circuit version, so a
+      change to a circuit is never answered from the cache. `Cache-Status` tells whether an
+      answer came from it.
     - **Limits.** A circuit has at most 10,000 gates and 50,000 wires; request bodies are at most 5 MB.
 
 servers:
@@ -278,6 +284,8 @@ paths:
       responses:
         "200":
           description: The simulation result.
+          headers:
+            Cache-Status: { $ref: "#/components/headers/CacheStatus" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SimulationResponse" }
@@ -300,7 +308,9 @@ paths:
         bit. The response format follows `Accept`:
 
         - `application/json` (default): one page of at most 4,096 rows, with links to other pages.
+          Pages are cached (see `Cache-Status`).
         - `application/x-ndjson` or `text/csv`: a stream of up to 1,048,576 rows, for downloads.
+          For more rows, start a background job (`POST .../truth-table/jobs`).
 
         To page through a table while being sure it does not change underneath you, pass the
         `version` from the first page to the following ones (the `next` link already does). If the
@@ -315,6 +325,7 @@ paths:
           description: The rows.
           headers:
             ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Status: { $ref: "#/components/headers/CacheStatus" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TruthTablePage" }
@@ -335,6 +346,128 @@ paths:
         "422": { $ref: "#/components/responses/InvalidContent" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
 
+  /circuits/{circuitId}/truth-table/jobs:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+    post:
+      operationId: createTruthTableJob
+      tags: [Simulation]
+      summary: Compute a truth table in the background
+      security:
+        - bearerAuth: []
+      description: |
+        Starts a job that computes the truth table, or `offset` and `limit` rows of it, without
+        holding a request open. Any job size fits, from one row up to the limits below; it is meant
+        for tables too large to download at once (more than 1,048,576 rows).
+
+        The answer is 202 with the job, and its URL in `Location`. Poll that URL (as often as
+        `Retry-After` says) until `status` is `succeeded`, then download `links.result` as CSV or
+        NDJSON. Results are kept for 24 hours. Sending the same request again while your identical
+        job is still waiting or running returns that job instead of starting another, so a retried
+        request never doubles the work.
+
+        Limits per job: 16,777,216 rows; 2,147,483,648 gate evaluations (rows times gates); a
+        result of 134,217,728 output values (rows times outputs). Per user: 2 jobs waiting or
+        running at once, and 20 jobs in any 24 hours (429 with `Retry-After` beyond either).
+        The job computes the circuit version current when it was started; if the circuit changes
+        before the job begins, the job fails with `version-conflict`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TruthTableJobRequest" }
+      responses:
+        "202":
+          description: The job (new, or your identical job that is still waiting or running).
+          headers:
+            Location: { $ref: "#/components/headers/JobLocation" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TruthTableJob" }
+        "400": { $ref: "#/components/responses/InvalidRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/VersionConflict" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+        "422": { $ref: "#/components/responses/InvalidContent" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/truth-table/jobs/{jobId}:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+      - $ref: "#/components/parameters/JobId"
+    get:
+      operationId: getTruthTableJob
+      tags: [Simulation]
+      summary: A truth-table job's status and progress
+      security:
+        - bearerAuth: []
+      description: |
+        Only the person who started a job sees it, and only while they can still see the circuit.
+        While the job is waiting or running, `Retry-After` says when to ask again.
+      responses:
+        "200":
+          description: The job.
+          headers:
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TruthTableJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+    delete:
+      operationId: deleteTruthTableJob
+      tags: [Simulation]
+      summary: Cancel a truth-table job, or delete its result
+      security:
+        - bearerAuth: []
+      description: |
+        A job that is waiting or running is cancelled. A finished job's result is deleted. Either
+        way the job stays in the circuit's run history.
+      responses:
+        "204":
+          description: Cancelled, or its result deleted (also if that had already happened).
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /circuits/{circuitId}/truth-table/jobs/{jobId}/result:
+    parameters:
+      - $ref: "#/components/parameters/CircuitId"
+      - $ref: "#/components/parameters/JobId"
+    get:
+      operationId: getTruthTableJobResult
+      tags: [Simulation]
+      summary: Download a truth-table job's rows
+      security:
+        - bearerAuth: []
+      description: |
+        The rows the job computed, as CSV (the default) or NDJSON, exactly as the truth-table
+        download would give them for the same range.
+      responses:
+        "200":
+          description: The rows.
+          headers:
+            Content-Disposition: { $ref: "#/components/headers/ContentDisposition" }
+          content:
+            text/csv:
+              schema:
+                type: string
+                description: A header line `#,<input ids>,<output ids>`, then one line per row.
+            application/x-ndjson:
+              schema:
+                description: One of these per line.
+                $ref: "#/components/schemas/TruthTableStreamRow"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "406": { $ref: "#/components/responses/NotAcceptable" }
+        "409": { $ref: "#/components/responses/NoResult" }
+        "410": { $ref: "#/components/responses/ResultGone" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
   /circuits/{circuitId}/runs:
     parameters:
       - $ref: "#/components/parameters/CircuitId"
@@ -347,8 +480,8 @@ paths:
       description: |
         Newest first. Every simulation the API runs is recorded, whether it succeeded or failed
         (an invalid input, a feedback loop), together with the circuit version it ran on. Requests
-        turned away before running (503) are not runs. Truth-table pages are not recorded; background
-        truth-table jobs will be (phase 10).
+        turned away before running (503) are not runs. Truth-table pages are not recorded;
+        background truth-table jobs are (`kind: truth_table`, with the job's id).
 
         The owner sees everyone's runs; anyone else who can see the circuit sees only their own.
       parameters:
@@ -699,6 +832,14 @@ components:
         type: integer
         minimum: 1
 
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      description: The job's id, from the `Location` of the request that started it.
+      schema:
+        type: string
+
     IfMatch:
       name: If-Match
       in: header
@@ -724,6 +865,24 @@ components:
       schema:
         type: string
         examples: [/v1/circuits/0199a3c4-5e6f-7a8b-9c0d-1e2f3a4b5c6d]
+    JobLocation:
+      description: URL of the job, to poll.
+      schema:
+        type: string
+        examples: [/v1/circuits/0199a3c4-5e6f-7a8b-9c0d-1e2f3a4b5c6d/truth-table/jobs/0199a3d0-1111-7222-8333-444455556666]
+    CacheStatus:
+      description: |
+        Whether the answer came from the API's result cache (RFC 9211): `CircuitLab; hit`, or
+        `CircuitLab; fwd=miss; stored` when it was computed for this request and kept for the next
+        one. Answers are cached per circuit version, so they are never stale.
+      schema:
+        type: string
+        examples: ["CircuitLab; hit"]
+    ContentDisposition:
+      description: Suggests a file name for saving the download.
+      schema:
+        type: string
+        examples: ['attachment; filename="truth-table-0199a3d0-1111-7222-8333-444455556666.csv"']
     Link:
       description: RFC 8288 links to neighbouring pages, e.g. `<...>; rel="next"`.
       schema:
@@ -771,7 +930,9 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     TooManyRequests:
-      description: Too many failed attempts (`too-many-requests`); see `Retry-After`.
+      description: |
+        Too many failed sign-ins, or too many truth-table jobs (`too-many-requests`); see
+        `Retry-After`.
       headers:
         Retry-After: { $ref: "#/components/headers/RetryAfter" }
       content:
@@ -791,6 +952,20 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     VersionConflict:
       description: The circuit changed since the first page was fetched (`version-conflict`).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NoResult:
+      description: |
+        The job has no result: it is still waiting or running (`job-unfinished`, with
+        `Retry-After`), or it failed or was cancelled (`job-failed`).
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ResultGone:
+      description: The job's result has expired or was deleted (`result-gone`). Start a new job.
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1149,11 +1324,10 @@ components:
           type: integer
           minimum: 1
         kind:
+          description: A simulation (`simulate`), or a background truth-table job (`truth_table`).
           type: string
           enum: [simulate, truth_table]
-        status:
-          type: string
-          enum: [queued, running, succeeded, failed, cancelled]
+        status: { $ref: "#/components/schemas/RunStatus" }
         inputs:
           description: The input values, keyed by INPUT gate id (only the circuit's own inputs are kept).
           type: object
@@ -1162,11 +1336,91 @@ components:
           description: When it succeeded, the value of every OUTPUT gate.
           type: object
           additionalProperties: { $ref: "#/components/schemas/Bit" }
+        offset:
+          description: Truth-table jobs. The first row.
+          type: integer
+          minimum: 0
+        limit:
+          description: Truth-table jobs. How many rows.
+          type: integer
+          minimum: 1
         errorCode:
           description: When it failed, the problem code the API answered with, e.g. `invalid-inputs`.
           type: string
         createdAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
+
+    RunStatus:
+      description: |
+        `queued` (waiting for a worker), `running`, then `succeeded`, `failed`, or `cancelled`.
+        Simulations are answered at once, so only background jobs are ever seen queued or running.
+      type: string
+      enum: [queued, running, succeeded, failed, cancelled]
+
+    TruthTableJobRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        offset:
+          description: The first row.
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          default: 0
+        limit:
+          description: How many rows. Default (and at most) the rest of the table.
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        version:
+          description: Refuse (409) unless the circuit is still at this version.
+          type: integer
+          minimum: 1
+      examples:
+        - {}
+        - { offset: 0, limit: 4194304, version: 3 }
+
+    TruthTableJob:
+      type: object
+      required: [id, circuitId, circuitVersion, status, offset, limit, rowsDone, createdAt, links]
+      properties:
+        id: { type: string }
+        circuitId: { type: string }
+        circuitVersion:
+          description: The circuit version whose table this is.
+          type: integer
+          minimum: 1
+        status: { $ref: "#/components/schemas/RunStatus" }
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          description: Rows in this job (the request's `limit`, cut at the end of the table).
+          type: integer
+          minimum: 1
+        rowsDone:
+          description: Rows computed so far.
+          type: integer
+          minimum: 0
+        errorCode:
+          description: When it failed, the problem code, e.g. `version-conflict` or `simulation-timeout`.
+          type: string
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        expiresAt:
+          description: When it succeeded, until when the result can be downloaded.
+          type: string
+          format: date-time
+        links:
+          type: object
+          required: [self, circuit]
+          properties:
+            self: { type: string }
+            circuit: { type: string }
+            result:
+              description: While the result can be downloaded.
+              type: string
 
     SimulationRunList:
       type: object
@@ -1414,6 +1668,9 @@ components:
             - not-acceptable
             - email-taken
             - version-conflict
+            - job-unfinished
+            - job-failed
+            - result-gone
             - precondition-failed
             - content-too-large
             - unsupported-media-type
