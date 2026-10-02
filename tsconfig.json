@@ -8,6 +8,7 @@
     { "path": "packages/api-contract" },
     { "path": "packages/database" },
     { "path": "apps/api" },
+    { "path": "apps/desktop/electron" },
     { "path": "examples" }
   ]
 }

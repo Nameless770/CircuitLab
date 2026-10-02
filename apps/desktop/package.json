@@ -1,0 +1,27 @@
+{
+  "name": "@circuitlab/desktop",
+  "productName": "CircuitLab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CircuitLab as a desktop app (Electron): your circuits on the API when signed in, or netlist files offline",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "tsc -b electron && node scripts/dev.mjs",
+    "build": "tsc -p . && tsc -b electron && vite build",
+    "start": "npm run build && electron .",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@circuitlab/engine": "^0.1.0",
+    "@circuitlab/netlist": "^0.1.0"
+  },
+  "devDependencies": {
+    "@circuitlab/api": "^0.1.0",
+    "@circuitlab/api-contract": "^0.1.0",
+    "@types/node": "^24.0.0",
+    "electron": "^44.5.1",
+    "playwright-core": "^1.63.0",
+    "vite": "^8.3.1"
+  }
+}

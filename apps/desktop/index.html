@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Only our own code may run. ws://localhost:5173 is Vite's hot reload during development. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:5173" />
+    <meta name="description" content="Build digital logic circuits and simulate them, online or offline." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>CircuitLab</title>
+  </head>
+  <body>
+    <header id="header" class="site-header"></header>
+    <main id="app" class="site-main"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

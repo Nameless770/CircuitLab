@@ -15,7 +15,10 @@ done:
 - **Phase 10:** Redis: cached simulation results, truth tables too big for one response as
   background jobs (BullMQ), and a sign-in throttle shared by every API instance.
 
-Everything compiles to CommonJS.
+Outside the roadmap, there is also a **desktop app** (Electron) to use all of it with a mouse: online
+with your account on the API, or offline with netlist files. See [the desktop app](#the-desktop-app).
+
+Everything compiles to CommonJS, except the desktop app's window, which Vite bundles.
 
 ```
 packages/engine/        @circuitlab/engine        data model, validation, sorting, simulation, truth tables
@@ -25,12 +28,14 @@ packages/runner/        @circuitlab/runner        SimulationPool: runs simulatio
 packages/api-contract/  @circuitlab/api-contract  openapi.yaml, plus the framework-free code that enforces it
 packages/database/      @circuitlab/database      PostgreSQL 18 migrations, schema.prisma, the Prisma Client, a local dev server
 apps/api/               @circuitlab/api           the NestJS app
+apps/desktop/           @circuitlab/desktop       the desktop app: electron/ (main process), src/ (the window)
 docs/api-design.md      why the API looks the way it does
 docs/database-design.md why the database looks the way it does
 docs/auth-design.md     accounts, tokens, and who may do what
 docs/testing.md         how it is tested, and what the tests found
 docs/design-patterns.md the patterns in the code, and why each one is there
 docs/caching-and-jobs.md the result cache, background jobs, and what lives in Redis
+docs/desktop-app.md     the desktop app: how it works, the decisions, and its known shortcuts
 examples/               demos, and sample netlists in examples/netlists/
 */test/                 each package's tests (Vitest)
 ```
@@ -41,6 +46,8 @@ examples/               demos, and sample netlists in examples/netlists/
 - The API contract depends on those three.
 - The database package depends on nothing at runtime but Prisma (its check uses the engine and netlist).
 - The app depends on all of them.
+- The desktop app runs the engine and netlist packages offline, and talks to the API over HTTP
+  online (it only imports the contract's *types*).
 
 ## Commands
 
@@ -59,6 +66,9 @@ npm run demo:patterns  # phase 9: the gate registry, both simulation strategies,
 npm run demo:jobs      # phase 10: the result cache, and a 2-million-row truth table as a background job
 npm run start:api      # phase 4: runs the API on http://localhost:3000/v1
 npm run start:worker   # phase 10: a worker process that computes truth-table jobs (needs REDIS_URL)
+npm run dev:desktop    # the desktop app, with hot reload (run start:api too, for online mode)
+npm run start:desktop  # the desktop app, built as users get it
+npm run smoke:desktop  # clicks through the real desktop app (Playwright); screenshots in apps/desktop/dist/smoke/
 npm run lint:api       # checks openapi.yaml (Redocly, fetched on first use)
 npm run db:start       # phase 6: a local PostgreSQL 18 on port 5433, nothing to install (leave it running)
 npm run db:migrate     # phase 6: applies the migrations (prisma migrate deploy)
@@ -162,6 +172,37 @@ AppModule
   - **Shutdown.** On SIGTERM or SIGINT, Nest stops taking requests and drains those in flight.
     Then the pool closes, and any simulation still running after `SHUTDOWN_GRACE_MS` is stopped.
 
+## The desktop app
+
+```bash
+npm run start:api
+```
+
+```bash
+npm run dev:desktop
+```
+
+The home screen offers two modes:
+- **Online:** register or sign in, then make circuits (draw them, write a netlist, upload a
+  file, or start from an example), share them, make them public, and let the server compute big
+  truth tables in the background. It shows whether the server is reachable.
+- **Offline:** open, draw and save `.net` files on your computer, simulated by the app itself.
+  No account or server needed. File > Open (Ctrl+O) works from anywhere.
+
+In both, click a circuit's inputs to switch them and watch the wires light up. A circuit with
+a feedback loop (a latch) runs step by step and remembers its state. Truth tables page through
+any size, and export to CSV.
+
+[docs/desktop-app.md](docs/desktop-app.md) explains how it works and why, and lists its known
+shortcuts. In short:
+- **Electron** runs our engine and netlist packages offline as they are.
+- **The window has no Node.js access:** it can only call the functions in
+  `electron/bridge.ts`.
+- **No CORS needed:** the window calls `/v1/...`, which Vite (while developing) or the main
+  process (built app) forwards to the API, so the API needed no changes.
+- **The API stores no gate positions,** so circuits are laid out automatically (and where you
+  move gates is remembered on your computer).
+
 ## REST API
 
 The contract is [openapi.yaml](packages/api-contract/openapi.yaml), and the reasoning behind it is
@@ -226,7 +267,7 @@ development.
 
 ## Testing
 
-`npm test` runs 709 tests in about 25 seconds (Docker must be running, for Redis).
+`npm test` runs 746 tests in about 25 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.

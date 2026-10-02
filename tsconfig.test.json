@@ -13,5 +13,7 @@
     "moduleResolution": "nodenext",
     "types": ["node"]
   },
-  "include": ["packages/*/test", "apps/*/test", "vitest.config.mts"]
+  "include": ["packages/*/test", "apps/*/test", "vitest.config.mts"],
+  // The desktop app's tests are checked with its own tsconfig (browser code, bundler-style imports): `tsc -p apps/desktop`.
+  "exclude": ["apps/desktop"]
 }

@@ -19,6 +19,8 @@ export default defineConfig({
       { extends: true, test: { name: "api-contract", include: ["packages/api-contract/test/**/*.test.ts"] } },
       // Each API test file starts the whole app (and, for PostgreSQL, a database): give them time.
       { extends: true, test: { name: "api", include: ["apps/api/test/**/*.test.ts"], testTimeout: 20_000 } },
+      // The desktop app's plain logic (layout, editing rules, offline simulation); the UI itself is checked by hand.
+      { extends: true, test: { name: "desktop", include: ["apps/desktop/test/**/*.test.ts"] } },
     ],
     coverage: {
       provider: "v8",

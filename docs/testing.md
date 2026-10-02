@@ -4,7 +4,7 @@
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 709 of them in about 25 seconds. The
+That builds everything, type-checks the tests, and runs all 746 of them in about 25 seconds. The
 API's integration tests run twice: once with everything in memory, and once as production runs,
 on a real PostgreSQL 18 and a real Redis 8.
 
@@ -17,7 +17,12 @@ container (`redis:8-alpine`), and the test with several processes also starts a 
 | `npm test` | Build, type-check the tests, run them all |
 | `npm run test:coverage` | The same, with a coverage report (`coverage/index.html`); fails below the thresholds |
 | `npm run test:watch` | Re-runs tests as files change; run `npx tsc -b -w` alongside so the build stays current |
-| `npx vitest run --project engine` | One package: `engine`, `netlist`, `runner`, `api-contract`, or `api` |
+| `npx vitest run --project engine` | One package: `engine`, `netlist`, `runner`, `api-contract`, `api`, or `desktop` |
+| `npm run smoke:desktop` | Clicks through the real desktop app with Playwright (see [desktop-app.md](desktop-app.md#testing)); not part of `npm test` |
+
+The desktop app's unit tests test its source directly (Vite transforms them), not a build: its
+window code is bundled by Vite, never compiled by `tsc` alone. `npm test` type-checks them with
+`tsc -p apps/desktop`.
 
 ## The choices
 

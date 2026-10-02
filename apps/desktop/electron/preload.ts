@@ -1,0 +1,24 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type { DesktopBridge, MenuCommand } from "./bridge";
+
+/**
+ * Runs in the window before its own code, with access to Electron's IPC. It exposes exactly the
+ * functions in DesktopBridge as `window.circuitlab`, and nothing else: never ipcRenderer itself,
+ * which would let the window send any message to the main process.
+ */
+const bridge: DesktopBridge = {
+  apiUrl: () => ipcRenderer.invoke("circuitlab:api-url"),
+  openFile: () => ipcRenderer.invoke("circuitlab:open-file"),
+  readFile: (path) => ipcRenderer.invoke("circuitlab:read-file", path),
+  saveFile: (path, text, suggestedName) => ipcRenderer.invoke("circuitlab:save-file", path, text, suggestedName),
+  parse: (text) => ipcRenderer.invoke("circuitlab:parse", text),
+  toNetlist: (circuit) => ipcRenderer.invoke("circuitlab:to-netlist", circuit),
+  simulate: (circuit, request) => ipcRenderer.invoke("circuitlab:simulate", circuit, request),
+  truthTable: (circuit, offset, limit) => ipcRenderer.invoke("circuitlab:truth-table", circuit, offset, limit),
+  exportTruthTable: (circuit, suggestedName) => ipcRenderer.invoke("circuitlab:export-truth-table", circuit, suggestedName),
+  onMenuCommand: (listener) => {
+    ipcRenderer.on("circuitlab:menu", (_event, command: MenuCommand) => listener(command));
+  },
+};
+
+contextBridge.exposeInMainWorld("circuitlab", bridge);
