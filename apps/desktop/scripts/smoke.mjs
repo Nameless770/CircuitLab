@@ -6,6 +6,8 @@
 // (test/*.test.ts) check the logic; this checks that the screens and the pieces fit together.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -42,16 +44,23 @@ const packaged = process.argv.includes("--packaged");
 const packagedExe = path.join(appDir, "release", "win-unpacked", "CircuitLab.exe");
 if (packaged && !existsSync(packagedExe)) throw new Error(`${packagedExe} doesn't exist: run npm run package:desktop first.`);
 console.log(`Testing ${packaged ? packagedExe : "the build in dist/"}`);
-const app = await _electron.launch({
-  executablePath: packaged ? packagedExe : String(electronPath),
-  args: packaged ? [] : [appDir],
-  env: { ...process.env, CIRCUITLAB_API_URL: apiUrl, CIRCUITLAB_USER_DATA_DIR: profileDir },
-});
+
+// How to start the app with a file, as Windows does when a .net file is double-clicked.
+const executable = packaged ? packagedExe : String(electronPath);
+const argsFor = (file) => (packaged ? [file] : [appDir, file]);
+const netlist = (name) => path.join(appDir, "..", "..", "examples", "netlists", name);
+
+// No CIRCUITLAB_API_URL: the test sets the server address through the Settings screen, as a user would.
+const env = { ...process.env, CIRCUITLAB_USER_DATA_DIR: profileDir };
+delete env.CIRCUITLAB_API_URL;
+const app = await _electron.launch({ executablePath: executable, args: argsFor(netlist("full-adder.net")), env });
 const page = await app.firstWindow();
 const problems = [];
 page.on("pageerror", (error) => problems.push(`page error: ${error.message}`));
 page.on("console", (message) => {
-  if (message.type() === "error") problems.push(`console error: ${message.text()}`);
+  // Chromium also logs every failed request ("Failed to load resource: ... 503"). Those are
+  // expected here (the app checks a server that isn't running) and the app shows them itself.
+  if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) problems.push(`console error: ${message.text()}`);
 });
 
 let shot = 0;
@@ -81,7 +90,29 @@ async function step(name, work) {
 }
 
 try {
+  await step("opens the .net file it was started with", async () => {
+    await page.locator("h1", { hasText: "Full adder" }).waitFor();
+    await see("Simulated on this computer.");
+    await screenshot("startup-file");
+  });
+
+  await step("settings: point online mode at this run's API", async () => {
+    await go("#/settings");
+    // The browser itself refuses things that aren't URLs at all (the field is type="url");
+    // an ftp:// address passes that, and our own check must catch it.
+    await page.getByLabel("Server address").fill("ftp://example.com");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await see("must start with http:// or https://");
+    await page.getByLabel("Server address").fill(`${apiUrl}/`);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await see(`Server online at ${apiUrl} `); // saved without the trailing slash
+    const saved = JSON.parse(readFileSync(path.join(profileDir, "settings.json"), "utf8"));
+    assert.equal(saved.apiUrl, apiUrl);
+    await screenshot("settings");
+  });
+
   await step("home screen, server online", async () => {
+    await go("#/");
     await see("Server online");
     await screenshot("home");
   });
@@ -204,6 +235,15 @@ try {
     await page.getByRole("button", { name: "Upload to my account" }).click();
     await see("Simulated by the server.");
     assert.notEqual(await page.evaluate(() => location.hash), circuitHash);
+  });
+
+  await step("a second launch with a file hands it to the running app", async () => {
+    const second = spawn(executable, argsFor(netlist("half-adder.net")), { env, stdio: "ignore" });
+    const [code] = await once(second, "exit"); // it finds the running app, passes the file on, and quits
+    assert.equal(code, 0);
+    await page.locator("h1", { hasText: "Half adder" }).waitFor();
+    assert.equal(app.windows().length, 1, "still one window");
+    await screenshot("second-instance");
   });
 
   await step("online: the list shows both circuits", async () => {

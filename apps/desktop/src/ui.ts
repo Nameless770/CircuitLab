@@ -1,4 +1,5 @@
 import { ApiError, NetworkError } from "./api";
+import { SettingError } from "../electron/helpers";
 import { LocalError } from "./desktop";
 import { h } from "./dom";
 
@@ -17,7 +18,7 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
 
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return FRIENDLY_MESSAGES[error.code] ?? error.message;
-  if (error instanceof NetworkError || error instanceof LocalError) return error.message;
+  if (error instanceof NetworkError || error instanceof LocalError || error instanceof SettingError) return error.message;
   return `Something went wrong: ${error instanceof Error ? error.message : String(error)}`;
 }
 

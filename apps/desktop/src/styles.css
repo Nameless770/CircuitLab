@@ -317,6 +317,10 @@ button.small,
   margin: 24px auto;
 }
 
+.settings-card {
+  max-width: 720px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

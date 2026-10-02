@@ -10,8 +10,14 @@ import type { Bit, Gate, SimulationMode, Wire } from "@circuitlab/engine";
  * few functions listed here, never read or write arbitrary files itself.
  */
 export interface DesktopBridge {
-  /** Where online mode's API is (CIRCUITLAB_API_URL, default http://localhost:3000). */
-  apiUrl(): Promise<string>;
+  /** Online mode's server address, and where it comes from. */
+  getSettings(): Promise<AppSettings>;
+  /** Saves a new server address (null: back to the default). Resolves to the settings now in use. */
+  setApiUrl(url: string | null): Promise<LocalResult<AppSettings>>;
+  /** The netlist file the app was started with (a double-clicked .net file), the first time it's asked; then null. */
+  takeStartupFile(): Promise<string | null>;
+  /** A .net file double-clicked while the app is already open. */
+  onOpenFile(listener: (path: string) => void): void;
   /** Shows the Open dialog and reads the netlist file. null if the user cancelled. */
   openFile(): Promise<LocalResult<OpenedFile> | null>;
   /** Reads a netlist file without a dialog (recent files). */
@@ -30,7 +36,17 @@ export interface DesktopBridge {
   onMenuCommand(listener: (command: MenuCommand) => void): void;
 }
 
-export type MenuCommand = "open" | "new" | "home";
+export type MenuCommand = "open" | "new" | "home" | "settings";
+
+export interface AppSettings {
+  /** The API address in use right now. */
+  readonly apiUrl: string;
+  /** What the Settings screen saved, or null if nothing was ever saved. */
+  readonly savedApiUrl: string | null;
+  readonly defaultApiUrl: string;
+  /** CIRCUITLAB_API_URL is set (development, tests): it wins over the saved address for this run. */
+  readonly fromEnvironment: boolean;
+}
 
 /** A circuit as the window sends it: what the netlist file holds. */
 export interface CircuitData {

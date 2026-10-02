@@ -4,7 +4,7 @@
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 746 of them in about 25 seconds. The
+That builds everything, type-checks the tests, and runs all 753 of them in about 25 seconds. The
 API's integration tests run twice: once with everything in memory, and once as production runs,
 on a real PostgreSQL 18 and a real Redis 8.
 

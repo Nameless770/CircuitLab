@@ -7,7 +7,12 @@ import type { DesktopBridge, MenuCommand } from "./bridge";
  * which would let the window send any message to the main process.
  */
 const bridge: DesktopBridge = {
-  apiUrl: () => ipcRenderer.invoke("circuitlab:api-url"),
+  getSettings: () => ipcRenderer.invoke("circuitlab:get-settings"),
+  setApiUrl: (url) => ipcRenderer.invoke("circuitlab:set-api-url", url),
+  takeStartupFile: () => ipcRenderer.invoke("circuitlab:take-startup-file"),
+  onOpenFile: (listener) => {
+    ipcRenderer.on("circuitlab:open-path", (_event, path: string) => listener(path));
+  },
   openFile: () => ipcRenderer.invoke("circuitlab:open-file"),
   readFile: (path) => ipcRenderer.invoke("circuitlab:read-file", path),
   saveFile: (path, text, suggestedName) => ipcRenderer.invoke("circuitlab:save-file", path, text, suggestedName),

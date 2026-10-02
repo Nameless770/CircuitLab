@@ -2,6 +2,7 @@ import { desktop, requireDesktop, unwrap } from "../desktop";
 import { h } from "../dom";
 import { EXAMPLES } from "../examples";
 import { fileName, forgetRecent, openPath, openWithDialog, recentFiles, setDocument } from "../offline/document";
+import { serverStatusLine } from "../online/server-status";
 import { navigate, type PageContext } from "../router";
 import { currentSession } from "../session";
 import { errorBox, runAction } from "../ui";
@@ -21,8 +22,6 @@ export function homePage({ root, signal }: PageContext): void {
 
 function onlineCard(signal: AbortSignal): HTMLElement {
   const session = currentSession();
-  const status = h("p", { class: "server-status muted" }, "Checking the server…");
-  void showServerStatus(status, signal);
 
   const actions =
     session === null
@@ -43,24 +42,9 @@ function onlineCard(signal: AbortSignal): HTMLElement {
     h("h2", {}, "Online"),
     h("p", {}, "Your circuits on the CircuitLab server: saved in your account, shareable with other people, with truth tables computed by the server."),
     session === null ? null : h("p", {}, "Signed in as ", h("strong", {}, session.user.displayName), "."),
-    status,
+    serverStatusLine(signal),
     h("div", { class: "button-row" }, actions),
   );
-}
-
-/** Asks the API's /health endpoint, so a stopped server is obvious before anything fails. */
-async function showServerStatus(status: HTMLElement, signal: AbortSignal): Promise<void> {
-  const where = (await desktop()?.apiUrl()) ?? "the dev server's proxy";
-  try {
-    const response = await fetch("/health", { signal });
-    const health = (await response.json()) as { status?: string; storage?: { kind?: string } };
-    if (health.status !== "ok") throw new Error("unhealthy");
-    const storage = health.storage?.kind === "postgresql" ? "PostgreSQL" : "memory only: circuits are lost when it stops";
-    status.replaceChildren(h("span", { class: "dot dot-ok" }), `Server online at ${where} (storage: ${storage}).`);
-  } catch {
-    if (signal.aborted) return;
-    status.replaceChildren(h("span", { class: "dot dot-bad" }), `Can't reach the server at ${where}. Start it with `, h("code", {}, "npm run start:api"), ", or use offline mode.");
-  }
 }
 
 function offlineCard(): HTMLElement {

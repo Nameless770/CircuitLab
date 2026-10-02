@@ -196,15 +196,16 @@ any size, and export to CSV.
 
 To install it like any other program, run `npm run package:desktop` and run
 `apps/desktop/release/CircuitLab-Setup-0.1.0.exe`. It isn't code-signed yet, so Windows asks
-first: "More info", then "Run anyway".
+first: "More info", then "Run anyway". Once installed, double-clicking a `.net` file opens it in
+CircuitLab.
 
 [docs/desktop-app.md](docs/desktop-app.md) explains how it works and why, and lists its known
 shortcuts. In short:
 - **Electron** runs our engine and netlist packages offline as they are.
 - **The window has no Node.js access:** it can only call the functions in
   `electron/bridge.ts`.
-- **No CORS needed:** the window calls `/v1/...`, which Vite (while developing) or the main
-  process (built app) forwards to the API, so the API needed no changes.
+- **No CORS needed:** the window calls `/v1/...`, and the main process forwards it to the API at
+  the address in Settings (File > Settings), so the API needed no changes.
 - **The API stores no gate positions,** so circuits are laid out automatically (and where you
   move gates is remembered on your computer).
 
@@ -272,7 +273,7 @@ development.
 
 ## Testing
 
-`npm test` runs 746 tests in about 25 seconds (Docker must be running, for Redis).
+`npm test` runs 753 tests in about 25 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.

@@ -1,4 +1,5 @@
 import { signOut } from "./api";
+import { desktop } from "./desktop";
 import { h } from "./dom";
 import { currentDocument, fileName } from "./offline/document";
 import { currentPath, navigate, onPageChange } from "./router";
@@ -31,12 +32,15 @@ function header(): HTMLElement {
     links.push(link("/local", `File: ${openFile.path === null ? "unsaved" : fileName(openFile.path)}`, path.startsWith("/local")));
   }
 
+  // Settings only exist in the desktop app (the main process keeps them).
+  const settings = desktop() === null ? null : link("/settings", "Settings", path === "/settings");
   const account =
     session === null
-      ? h("div", { class: "account" }, h("a", { class: "button small", href: "#/login" }, "Sign in"))
+      ? h("div", { class: "account" }, settings, h("a", { class: "button small", href: "#/login" }, "Sign in"))
       : h(
           "div",
           { class: "account" },
+          settings,
           h("span", { class: "muted", title: session.user.email }, session.user.displayName),
           h(
             "button",

@@ -1,52 +1,75 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, readFileSync } from "node:fs";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, dialog, ipcMain, net, protocol, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
-import type { CircuitData, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
+import type { AppSettings, CircuitData, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
+import { netlistFileFromArgs, normalizeApiUrl } from "./helpers";
 import * as offline from "./offline";
 
 /**
- * The Electron main process: opens the window, owns the menu and the file dialogs, and runs
- * offline simulations (offline.ts). The window asks for these through preload.ts.
+ * The Electron main process: opens the window, owns the menu, the file dialogs and the settings,
+ * forwards the window's API requests, and runs offline simulations (offline.ts). The window asks
+ * for these through preload.ts.
  */
 
-/** Online mode's API. Change it with CIRCUITLAB_API_URL=https://... */
-const API_URL = (process.env["CIRCUITLAB_API_URL"] ?? "http://localhost:3000").replace(/\/+$/, "");
-/** Set by scripts/dev.mjs while developing: the window loads Vite's dev server (hot reload). */
+/** Online mode's server when nothing else is set: the API from `npm run start:api`. */
+const DEFAULT_API_URL = "http://localhost:3000";
+/** Set for development and tests; wins over the address saved in Settings. */
+const ENV_API_URL = process.env["CIRCUITLAB_API_URL"];
+/** Set by scripts/dev.mjs while developing: the window's files then come from Vite (hot reload). */
 const DEV_SERVER_URL = process.env["CIRCUITLAB_DEV_SERVER_URL"];
 /** The built window code (vite build), next to this file's folder: dist/renderer. */
 const RENDERER_DIR = path.join(__dirname, "..", "renderer");
 /** Netlist files bigger than this are refused: a real circuit is far smaller, and reading huge files would freeze the app. */
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-// Where the app keeps its data (sign-in, recent files). The smoke test points this at a
+// Where the app keeps its data (sign-in, recent files, settings). The smoke test points this at a
 // throwaway folder, so it never touches your real profile.
 const userDataDir = process.env["CIRCUITLAB_USER_DATA_DIR"];
 if (userDataDir !== undefined) app.setPath("userData", userDataDir);
 
-// Our own URL scheme, app://circuitlab/..., for the built app. It has to be registered before
-// the app is ready. "standard" and "secure" make it behave like https (fetch, localStorage).
+// Our own URL scheme, app://circuitlab/..., where the window's page always comes from. It has to
+// be registered before the app is ready. "standard" and "secure" make it behave like https
+// (fetch, localStorage).
 protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
 let mainWindow: BrowserWindow | null = null;
 
-void app.whenReady().then(() => {
-  if (DEV_SERVER_URL === undefined) protocol.handle("app", serveApp);
-  registerIpcHandlers();
-  Menu.setApplicationMenu(buildMenu());
-  createWindow();
-  // macOS keeps apps running without windows; clicking the dock icon opens one again.
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+/** The .net file the app was started with (double-clicked in Explorer), until the window takes it. */
+let startupFile = netlistFileFromArgs(process.argv);
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+// One CircuitLab at a time. Double-clicking a .net file while CircuitLab is open starts a second
+// copy, which finds the first one running, hands it the file ("second-instance") and quits.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    if (mainWindow === null) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    const file = netlistFileFromArgs(argv);
+    if (file !== null) mainWindow.webContents.send("circuitlab:open-path", file);
+  });
+
+  void app.whenReady().then(() => {
+    loadSettings();
+    protocol.handle("app", serveApp);
+    registerIpcHandlers();
+    Menu.setApplicationMenu(buildMenu());
+    createWindow();
+    // macOS keeps apps running without windows; clicking the dock icon opens one again.
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -70,7 +93,7 @@ function createWindow(): void {
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith(DEV_SERVER_URL ?? "app://circuitlab/")) event.preventDefault();
+    if (!url.startsWith("app://circuitlab/")) event.preventDefault();
   });
   // The editors cancel "beforeunload" while there are unsaved changes. A browser would then ask
   // "Leave site?"; Electron asks nothing and simply doesn't close, so we ask ourselves.
@@ -88,21 +111,64 @@ function createWindow(): void {
   window.on("closed", () => {
     mainWindow = null;
   });
-  void window.loadURL(DEV_SERVER_URL ?? "app://circuitlab/index.html");
+  void window.loadURL("app://circuitlab/index.html");
   mainWindow = window;
 }
 
 // ---------------------------------------------------------------------------------------------
-// app://circuitlab/... : the built window code, plus the API
+// Settings: online mode's server address, saved in settings.json in the app's data folder
+
+interface SavedSettings {
+  readonly apiUrl?: string;
+}
+
+let saved: SavedSettings = {};
+
+function settingsFile(): string {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function loadSettings(): void {
+  try {
+    const data = JSON.parse(readFileSync(settingsFile(), "utf8")) as { apiUrl?: unknown };
+    saved = typeof data.apiUrl === "string" ? { apiUrl: normalizeApiUrl(data.apiUrl) } : {};
+  } catch {
+    saved = {}; // no settings yet, or a damaged file: use the defaults
+  }
+}
+
+/** The API address in use: CIRCUITLAB_API_URL if set, else the saved one, else the default. */
+function apiUrl(): string {
+  if (ENV_API_URL !== undefined) return ENV_API_URL.replace(/\/+$/, "");
+  return saved.apiUrl ?? DEFAULT_API_URL;
+}
+
+function currentSettings(): AppSettings {
+  return { apiUrl: apiUrl(), savedApiUrl: saved.apiUrl ?? null, defaultApiUrl: DEFAULT_API_URL, fromEnvironment: ENV_API_URL !== undefined };
+}
+
+/** @throws SettingError for an address that can't be used */
+async function saveApiUrl(text: string | null): Promise<AppSettings> {
+  saved = text === null ? {} : { apiUrl: normalizeApiUrl(text) };
+  await mkdir(path.dirname(settingsFile()), { recursive: true });
+  await writeFile(settingsFile(), `${JSON.stringify(saved, null, 2)}\n`, "utf8");
+  return currentSettings();
+}
+
+// ---------------------------------------------------------------------------------------------
+// app://circuitlab/... : the window's files, plus the API
 
 /**
- * In the built app, the window's code comes from app://circuitlab/. Requests for /v1/... are
- * forwarded to the API, the job Vite's proxy does during development (vite.config.mts). So the
- * window's code always calls "/v1/..." and works the same in both.
+ * Everything the window loads goes through here:
+ * - `/v1/...` and `/health` are forwarded to the API (the address in Settings), so the window
+ *   always calls "/v1/..." and never needs CORS;
+ * - everything else is the window's own files: from Vite's dev server while developing (so hot
+ *   reload works), or from dist/renderer in the built app.
  */
 async function serveApp(request: Request): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/v1/") || url.pathname === "/health") return forwardToApi(request, url);
+  if (DEV_SERVER_URL !== undefined) return fetch(new URL(`${url.pathname}${url.search}`, DEV_SERVER_URL));
 
   const relative = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
   const file = path.join(RENDERER_DIR, relative);
@@ -125,8 +191,9 @@ async function forwardToApi(request: Request, url: URL): Promise<Response> {
     if (value !== null) headers.set(name, value);
   }
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  const server = apiUrl();
   try {
-    return await fetch(`${API_URL}${url.pathname}${url.search}`, {
+    return await fetch(`${server}${url.pathname}${url.search}`, {
       method: request.method,
       headers,
       body: hasBody ? await request.arrayBuffer() : undefined,
@@ -139,7 +206,7 @@ async function forwardToApi(request: Request, url: URL): Promise<Response> {
         title: "Server unavailable",
         status: 503,
         code: "server-unavailable",
-        detail: `Can't reach the CircuitLab API at ${API_URL}. Is it running? (npm run start:api)`,
+        detail: `Can't reach the CircuitLab API at ${server}. Is it running? Check the address in Settings.`,
       }),
       { status: 503, headers: { "Content-Type": "application/problem+json" } },
     );
@@ -150,7 +217,15 @@ async function forwardToApi(request: Request, url: URL): Promise<Response> {
 // What the window may ask for (see bridge.ts)
 
 function registerIpcHandlers(): void {
-  ipcMain.handle("circuitlab:api-url", () => API_URL);
+  ipcMain.handle("circuitlab:get-settings", () => currentSettings());
+
+  ipcMain.handle("circuitlab:set-api-url", (_event, text: unknown) => attempt(() => saveApiUrl(typeof text === "string" ? text : null)));
+
+  ipcMain.handle("circuitlab:take-startup-file", () => {
+    const file = startupFile;
+    startupFile = null; // only once: a reload of the window mustn't open it again
+    return file;
+  });
 
   ipcMain.handle("circuitlab:open-file", async (event) => {
     const options = {
@@ -241,6 +316,8 @@ function buildMenu(): Menu {
         { type: "separator" },
         { label: "New Offline Circuit", accelerator: "CmdOrCtrl+N", click: send("new") },
         { label: "Open Netlist File…", accelerator: "CmdOrCtrl+O", click: send("open") },
+        { type: "separator" },
+        { label: "Settings…", accelerator: "CmdOrCtrl+,", click: send("settings") },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],

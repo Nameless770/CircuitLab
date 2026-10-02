@@ -16,7 +16,7 @@ npm run package:desktop # make the Windows installer: apps/desktop/release/Circu
 ```
 
 Online mode needs the API: `npm run start:api` (it listens on port 3000). To use another server,
-set `CIRCUITLAB_API_URL` before starting the app.
+change its address in **Settings** (File > Settings, or the link in the top bar).
 
 ## How it fits together
 
@@ -84,12 +84,24 @@ strategies: one interface, interchangeable implementations.
 
 ### 5. Talking to the API without CORS
 
-The window always calls relative paths such as `/v1/circuits`:
-- **while developing,** Vite's dev server forwards them to the API (`vite.config.mts`);
-- **in the built app,** the window is loaded from `app://circuitlab/`, and the main process
-  forwards `/v1/...` to the API (`serveApp` in `main.ts`).
+The window always loads from `app://circuitlab/`, our own URL scheme, and every request it makes
+goes through one function in the main process (`serveApp` in `main.ts`):
+- `/v1/...` and `/health` are forwarded to the API, at the address in Settings;
+- everything else is the window's own files: from Vite's dev server while developing (so hot
+  reload still works), or from `dist/renderer` in the installed app.
 
-So the API didn't need any change, not even CORS headers.
+So the window always calls relative paths such as `/v1/circuits`, and the API didn't need any
+change, not even CORS headers.
+
+**Why one forwarder.** At first Vite's proxy did the forwarding during development and the main
+process did it in the built app. Two places doing one job have to agree, and only the main
+process can read the Settings, so now it does the job alone, in both.
+
+**Settings.** The server address is saved in `settings.json` in the app's data folder. The
+Settings screen checks it before saving: it must be an `http://` or `https://` address
+(`normalizeApiUrl` in [helpers.ts](../apps/desktop/electron/helpers.ts)). Accounts belong to a
+server, so changing the server signs you out (it asks first). `CIRCUITLAB_API_URL`, when set,
+overrides the saved address for one run; development and tests use that.
 
 ### 6. Signing in
 
@@ -168,7 +180,14 @@ installs for the current user only, so it needs no administrator rights.
   itself, so it must be the exact version we tested; electron-builder refuses a range.
 - **The icon** is [build/icon.svg](../apps/desktop/build/icon.svg), turned into `icon.png` by
   Electron itself (`npx electron scripts/make-icon.cjs`).
-- **Testing the result.** `npm run smoke:packaged -w @circuitlab/desktop` runs the same 11-step
+- **Double-click a `.net` file** and it opens in CircuitLab.
+  - **The association:** `fileAssociations` in electron-builder.yml makes the installer register
+    the file type for you; the uninstaller removes it.
+  - **The file:** Windows starts the app with the file's path as an argument, and
+    `netlistFileFromArgs` finds it.
+  - **Only one CircuitLab at a time** (`requestSingleInstanceLock`). If it's already open, the new
+    copy hands the file to the running one and quits, so you don't get a second window.
+- **Testing the result.** `npm run smoke:packaged -w @circuitlab/desktop` runs the same 14-step
   smoke test against `release/win-unpacked/CircuitLab.exe`, which holds exactly the files the
   installer installs.
 
@@ -184,8 +203,11 @@ certificate, which costs money and needs a verified identity; see the known shor
 - **The smoke test** ([smoke.mjs](../apps/desktop/scripts/smoke.mjs)) checks that the screens
   and pieces fit together:
   - **Setup.** It starts an API in memory and opens the *built* app with Playwright.
-  - **Steps.** It clicks through both modes in 11 steps: examples, a latch, drawing and saving a
-    file, an account, sharing, a background job, editing, uploading. It saves a screenshot of each.
+  - **Steps.** It clicks through both modes in 14 steps, and saves a screenshot of each:
+    - starting with a `.net` file, and a second launch handing one over;
+    - setting the server address in Settings;
+    - examples, a latch, drawing and saving a file;
+    - an account, sharing, a background job, editing, uploading.
   - **Isolation.** It uses a throwaway profile (`CIRCUITLAB_USER_DATA_DIR`), so it never signs
     you out or fills your list of recent files.
 
@@ -204,6 +226,6 @@ Things I chose not to do yet, and why:
 | Saving a drawing to a file rewrites it, losing comments | The app warns before you do it; "Edit netlist" keeps the text exactly | Keep comments by editing the text instead of rewriting it |
 | The installer isn't code-signed, so Windows SmartScreen warns before running it | Fine for a demo; signing needs a paid certificate and a verified identity | A code-signing certificate (or Azure Trusted Signing), set up in electron-builder |
 | No automatic updates: a new version means running a new installer | Releases are rare | electron-updater, with the installers published somewhere it can check |
-| Double-clicking a `.net` file doesn't open it in CircuitLab | File > Open works | `fileAssociations` in electron-builder.yml, plus opening the file the app was started with |
-| The API's address is only set with an environment variable, which is awkward for an installed app | One local server for now | A settings screen |
+| The installer makes CircuitLab the program for every `.net` file, and other tools use that extension too (KiCad writes netlists as `.net`) | CircuitLab's own files are `.net`; you can pick another program with "Open with" | Ask during installation, or use a more specific extension |
+| Double-clicking a file opens it on macOS only through a different event (`open-file`), which isn't handled | Only Windows is packaged | Handle `app.on("open-file")` when adding the macOS build |
 | Only Windows is packaged | It's the machine I have | `mac` and `linux` targets in electron-builder.yml, built on those systems |

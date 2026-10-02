@@ -25,8 +25,8 @@ import { clearSession, currentSession, saveSession } from "./session";
  * @circuitlab/api-contract, the same ones the server uses, so if the API changes shape,
  * TypeScript points at the code here that needs updating.
  *
- * Paths start with /v1. Vite forwards them to the API during development (vite.config.mts), and
- * electron/main.ts does in the built app.
+ * Paths start with /v1. The main process (electron/main.ts) forwards them to the API at the
+ * address in Settings.
  */
 
 const NETLIST = "text/vnd.circuitlab.netlist";
@@ -128,11 +128,11 @@ async function toApiError(response: Response): Promise<ApiError> {
       // Not JSON after all; fall through.
     }
   }
-  // Not an answer from the API itself. With the dev server, a 5xx like this usually means its
-  // proxy couldn't reach the API.
+  // Not an answer from the API itself: something between us and the API (a reverse proxy, say)
+  // failed. When the API can't be reached at all, the main process answers with a problem document.
   const message =
     response.status >= 500
-      ? `The server answered ${response.status}. Is the API running? (npm run start:api)`
+      ? `The server answered ${response.status}. Is the API running, at the address in Settings?`
       : `The server answered ${response.status} ${response.statusText}.`;
   return new ApiError(response.status, `http-${response.status}`, message, null, retryAfter);
 }

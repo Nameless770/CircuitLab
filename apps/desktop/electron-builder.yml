@@ -18,6 +18,14 @@ files:
   - dist/electron/**
   - package.json
 
+# Double-clicking a .net file opens it in CircuitLab. Registered for you only, like the install,
+# and removed again by the uninstaller.
+fileAssociations:
+  - ext: net
+    name: CircuitLab netlist
+    description: CircuitLab netlist
+    role: Editor
+
 win:
   target:
     - target: nsis # the classic Windows setup wizard

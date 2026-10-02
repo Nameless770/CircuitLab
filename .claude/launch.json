@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev:desktop",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:desktop"
+      ],
+      "port": 5173
+    }
+  ]
+}
