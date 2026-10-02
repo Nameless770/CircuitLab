@@ -16,6 +16,7 @@ import {
   newNetlistPage,
 } from "./pages/edit-pages";
 import { homePage } from "./pages/home";
+import { libraryPage, openLibraryItemPage } from "./pages/library-page";
 import { localPage } from "./pages/local-page";
 import { newCircuitPage } from "./pages/new-circuit";
 import { settingsPage } from "./pages/settings-page";
@@ -37,7 +38,9 @@ route("/circuits/:id", circuitPage);
 route("/circuits/:id/edit", editDrawingPage);
 route("/circuits/:id/netlist", editNetlistPage);
 
-// Offline: the netlist file open on this computer.
+// Offline: the library (circuits saved in the app), and the circuit that's open.
+route("/library", libraryPage);
+route("/library/:id", openLibraryItemPage);
 route("/local", localPage);
 route("/local/new", newLocalDrawingPage);
 route("/local/draw", editLocalDrawingPage);
@@ -64,6 +67,7 @@ if (bridge !== null) {
   bridge.onMenuCommand((command) => {
     if (command === "home") navigate("/");
     if (command === "new") navigate("/local/new");
+    if (command === "library") navigate("/library");
     if (command === "settings") navigate("/settings");
     if (command === "open") {
       openWithDialog().then(

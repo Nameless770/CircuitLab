@@ -54,6 +54,14 @@ export function navigate(path: string): void {
   location.hash = `#${path}`;
 }
 
+/**
+ * Goes to another page *instead of* the current one: the current page leaves the history, so
+ * Back skips it. For pages that only send you on, like `#/library/:id`.
+ */
+export function redirect(path: string): void {
+  location.replace(`#${path}`);
+}
+
 /** The current path and query, e.g. "/circuits?scope=public". */
 export function currentPath(): string {
   return location.hash.replace(/^#/, "") || "/";

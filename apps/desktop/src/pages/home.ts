@@ -1,11 +1,11 @@
 import { desktop, requireDesktop, unwrap } from "../desktop";
-import { h } from "../dom";
+import { appendAll, formatDate, h } from "../dom";
 import { EXAMPLES } from "../examples";
-import { fileName, forgetRecent, openPath, openWithDialog, recentFiles, setDocument } from "../offline/document";
+import { fileName, forgetRecent, libraryItems, openPath, openUnsaved, openWithDialog, recentFiles } from "../offline/document";
 import { serverStatusLine } from "../online/server-status";
 import { navigate, type PageContext } from "../router";
 import { currentSession } from "../session";
-import { errorBox, runAction } from "../ui";
+import { errorBox, loading, runAction } from "../ui";
 
 /** The start screen: the two ways to use the app, side by side. */
 export function homePage({ root, signal }: PageContext): void {
@@ -51,7 +51,7 @@ function offlineCard(): HTMLElement {
   const message = h("div");
   const isDesktop = desktop() !== null;
 
-  const openButton = h("button", { class: "primary", disabled: !isDesktop }, "Open netlist file…");
+  const openButton = h("button", { disabled: !isDesktop }, "Open netlist file…");
   openButton.addEventListener("click", () => {
     void runAction(openButton, message, async () => {
       if (await openWithDialog()) navigate("/local");
@@ -62,8 +62,7 @@ function offlineCard(): HTMLElement {
     const button = h("button", { class: "link-button", title: example.description, disabled: !isDesktop }, example.name);
     button.addEventListener("click", () => {
       void runAction(button, message, async () => {
-        const circuit = unwrap(await requireDesktop().parse(example.netlist));
-        setDocument({ path: null, text: example.netlist, circuit });
+        openUnsaved(example.netlist, unwrap(await requireDesktop().parse(example.netlist)));
         navigate("/local");
       });
     });
@@ -95,13 +94,50 @@ function offlineCard(): HTMLElement {
     "section",
     { class: "card mode-card" },
     h("h2", {}, "Offline"),
-    h("p", {}, "Netlist files (.net) on this computer, simulated right here. No account or server needed."),
+    h("p", {}, "Circuits saved in the app on this computer, simulated right here. No account or server needed."),
     isDesktop ? null : h("p", { class: "alert alert-warning" }, "Offline mode needs the desktop app. You're seeing this page in a browser tab."),
-    h("div", { class: "button-row" }, openButton, h("a", { class: "button", href: "#/local/new", "aria-disabled": !isDesktop }, "New circuit")),
+    h(
+      "div",
+      { class: "button-row" },
+      h("a", { class: "button primary", href: "#/local/new", "aria-disabled": !isDesktop }, "New circuit"),
+      h("a", { class: "button", href: "#/library", "aria-disabled": !isDesktop }, "Library"),
+      openButton,
+    ),
+    isDesktop ? libraryPreview() : null,
     h("div", { class: "examples" }, h("span", { class: "muted" }, "Try an example: "), exampleButtons),
     message,
     recentList,
   );
+}
+
+/** The most recently changed library circuits, one click away. */
+const PREVIEW_SIZE = 5;
+
+function libraryPreview(): HTMLElement {
+  const box = h("div", { class: "recent" }, h("h3", {}, "Your library"), loading());
+  void libraryItems().then(
+    (items) => {
+      if (items.length === 0) {
+        box.replaceChildren(h("h3", {}, "Your library"), h("p", { class: "muted" }, "Circuits you save appear here."));
+        return;
+      }
+      box.replaceChildren();
+      appendAll(
+        box,
+        h("h3", {}, "Your library"),
+        h(
+          "ul",
+          { class: "plain-list" },
+          items.slice(0, PREVIEW_SIZE).map((item) =>
+            h("li", {}, h("a", { href: `#/library/${encodeURIComponent(item.id)}` }, item.name), h("span", { class: "muted small" }, `saved ${formatDate(item.updatedAt)}`)),
+          ),
+        ),
+        items.length > PREVIEW_SIZE ? h("a", { href: "#/library" }, `See all ${items.length} circuits`) : null,
+      );
+    },
+    (error: unknown) => box.replaceChildren(h("h3", {}, "Your library"), errorBox(error)),
+  );
+  return box;
 }
 
 async function openRecent(path: string, button: HTMLButtonElement, message: HTMLElement): Promise<void> {

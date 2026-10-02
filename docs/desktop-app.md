@@ -5,8 +5,9 @@ logic circuits, switch their inputs, and watch the signals. It has two modes:
 
 - **Online:** your circuits on the CircuitLab API. Sign in, create circuits, share them, make
   them public, and let the server compute big truth tables in the background.
-- **Offline:** netlist files (`.net`) on your computer. No account and no server; the app
-  simulates them itself with the same engine the API uses.
+- **Offline:** circuits saved in the app's **library** on your computer, plus netlist files
+  (`.net`) when you want them. No account and no server; the app simulates them itself with the
+  same engine the API uses.
 
 ```bash
 npm run dev:desktop     # develop: the app with hot reload (start the API too for online mode)
@@ -149,8 +150,36 @@ After a simulation, a wire is green when it carries a 1.
 - **Big circuits.** Netlists can be edited as text, which suits circuits too big to draw, and
   pasting.
 
-### 9. Offline files
+### 9. Offline: the library, and files
 
+**The problem.** At first, offline work could only be kept as a file: every save opened a Save
+dialog, and nothing in the app listed what you had made.
+
+**The library.** Saving now keeps the circuit inside the app ([library.ts](../apps/desktop/electron/library.ts)).
+- **Save needs no dialog.** "Save" in the editor stores the circuit at once and opens its page,
+  ready to try. The Library page (Ctrl+L) lists everything, newest first, with a search; the home
+  screen shows the latest five.
+- **One JSON file per circuit** in the app's data folder (`%APPDATA%\CircuitLab\library`). Each
+  holds:
+  - the netlist itself;
+  - what a netlist can't hold: a description, and when it was created and last saved;
+  - a summary (gates, inputs, outputs), so the Library page lists circuits without reading
+    every netlist.
+- **Why files, and not the window's `localStorage`?** Files survive clearing the app's cache, have
+  no size limit, and can be backed up by copying a folder.
+- **Saves can't half-happen.** Each save writes a temporary file and then renames it over the
+  old one. If the app stops halfway, the old version is still whole.
+- **Reading back is careful.** Ids are checked before they touch the disk, so `../` can't
+  escape the folder. A damaged file is skipped rather than hiding every other circuit, and a
+  `format` number lets a later version recognise old files
+  ([library-entries.ts](../apps/desktop/electron/library-entries.ts), unit tested).
+
+**Files still work, when you ask for them.** "Export as file…" writes a `.net` copy;
+"Import netlist file…" and "Save to library" copy a file in. A file opened directly (File > Open,
+or a double-click) still saves back to that file. Online circuits have "Save to library" too,
+which keeps a copy that works without the server.
+
+**How files and errors work:**
 - **Files are netlists:** the format from phase 2, so files work with the rest of the project
   (`examples/netlists`, the API's netlist upload).
 - **Errors cross over as data.** An error thrown in the main process reaches the window as a bare
@@ -187,7 +216,7 @@ installs for the current user only, so it needs no administrator rights.
     `netlistFileFromArgs` finds it.
   - **Only one CircuitLab at a time** (`requestSingleInstanceLock`). If it's already open, the new
     copy hands the file to the running one and quits, so you don't get a second window.
-- **Testing the result.** `npm run smoke:packaged -w @circuitlab/desktop` runs the same 14-step
+- **Testing the result.** `npm run smoke:packaged -w @circuitlab/desktop` runs the same 17-step
   smoke test against `release/win-unpacked/CircuitLab.exe`, which holds exactly the files the
   installer installs.
 
@@ -203,10 +232,11 @@ certificate, which costs money and needs a verified identity; see the known shor
 - **The smoke test** ([smoke.mjs](../apps/desktop/scripts/smoke.mjs)) checks that the screens
   and pieces fit together:
   - **Setup.** It starts an API in memory and opens the *built* app with Playwright.
-  - **Steps.** It clicks through both modes in 14 steps, and saves a screenshot of each:
+  - **Steps.** It clicks through both modes in 17 steps, and saves a screenshot of each:
     - starting with a `.net` file, and a second launch handing one over;
     - setting the server address in Settings;
-    - examples, a latch, drawing and saving a file;
+    - examples, a latch;
+    - the library: saving with no dialog, listing, searching, opening, deleting, exporting a file;
     - an account, sharing, a background job, editing, uploading.
   - **Isolation.** It uses a throwaway profile (`CIRCUITLAB_USER_DATA_DIR`), so it never signs
     you out or fills your list of recent files.
@@ -219,6 +249,8 @@ Things I chose not to do yet, and why:
 | --- | --- | --- |
 | Tokens live in `localStorage`, where a script running in the window could read them | No user text ever goes into `innerHTML`, the CSP blocks other scripts, and no third-party code is loaded | Keep the refresh token in the main process (or the OS keychain) instead of the window |
 | Gate positions are kept per computer | The API has no field for them; the automatic layout covers everything else | Optional `x`/`y` on gates in the API: an additive change, so it fits in `/v1` |
+| The library lives on one computer: nothing syncs it to another | Online mode is the shared place; "Upload to my account" and "Export as file…" move circuits | Sync the library with the account |
+| Opening the Library page reads every saved circuit's file | Each is small: hundreds open in a blink | One index file listing them all |
 | Edit buttons show for every signed-in user who isn't the owner | The API doesn't say whether you're a viewer or an editor; a viewer who tries to save gets a clear 403 | Add your role to the circuit response |
 | Two app windows refreshing tokens at the same instant could end the session | It needs two windows and an expiring token at the same moment | Let the main process own the tokens, so there's one refresher |
 | Offline simulation runs in the main process, so a huge page of rows could freeze the app briefly | A page is at most 4,096 rows; normal circuits take milliseconds | Run it on `@circuitlab/runner`'s worker threads, like the API |

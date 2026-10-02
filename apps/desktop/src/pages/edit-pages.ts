@@ -16,14 +16,14 @@ import { fileNameFor, h, plural } from "../dom";
 import { draftFromCircuit, emptyDraft, toCircuitInput, type Draft } from "../editor/draft";
 import { openEditor } from "../editor/editor-view";
 import { NETLIST_TEMPLATE, openNetlistEditor } from "../editor/netlist-view";
-import { positionsKey, restoreDocument, setDocument } from "../offline/document";
+import { positionsKey, restoreDocument, saveInLibrary, setDocument, type DocumentSource, type LocalDocument } from "../offline/document";
 import type { PageContext } from "../router";
 import { loading } from "../ui";
 import { requireSignIn } from "./account";
 
 /**
  * The pages that open an editor. Each says where the circuit comes from and how to check and
- * save it: through the API (online), or into a netlist file (offline).
+ * save it: through the API (online), or into the app's library or a netlist file (offline).
  */
 
 /** "Looks good: 5 gates, inputs A, B → outputs S, C." */
@@ -123,9 +123,8 @@ export async function editNetlistPage(context: PageContext): Promise<void> {
   });
 }
 
-
 // ---------------------------------------------------------------------------------------------
-// Offline: netlist files on this computer
+// Offline: circuits in the app's library, or netlist files
 
 function needsDesktop(root: HTMLElement): boolean {
   if (desktop() !== null) return false;
@@ -138,15 +137,27 @@ async function checkLocal(input: CircuitInput): Promise<string> {
   return describeCheck(circuit.summary, circuit.gates.length);
 }
 
-/** Writes the drawing to a file (asking where if `path` is null) and makes it the open document. */
-async function saveDrawingToFile(draft: Draft, path: string | null): Promise<string | null> {
-  const bridge = requireDesktop();
-  const { circuit, text } = unwrap(await bridge.toNetlist({ name: draft.name.trim(), gates: draft.gates, wires: draft.wires }));
-  const savedPath = unwrap(await bridge.saveFile(path, text, fileNameFor(draft.name)));
-  if (savedPath === null) return null;
-  setDocument({ path: savedPath, text, circuit });
-  savePositions(positionsKey(savedPath), draft.positions);
-  return "/local";
+/**
+ * Where offline work is saved: a circuit opened from a file goes back to that file; everything
+ * else goes into the library, with no file dialog. Resolves to the saved circuit, now the open one.
+ */
+async function saveOffline(text: string, description: string, source: DocumentSource): Promise<LocalDocument> {
+  if (source.kind === "file") {
+    const circuit = unwrap(await requireDesktop().parse(text)); // never write a file that doesn't read back
+    unwrap(await requireDesktop().saveFile(source.path, text, fileNameFor(circuit.name)));
+    const saved: LocalDocument = { source, text, circuit };
+    setDocument(saved);
+    return saved;
+  }
+  return saveInLibrary(text, description, source.kind === "library" ? source.id : undefined);
+}
+
+/** Saves a drawing: turned into netlist text first, which also checks it. */
+async function saveDrawing(draft: Draft, source: DocumentSource): Promise<string> {
+  const { text } = unwrap(await requireDesktop().toNetlist({ name: draft.name.trim(), gates: draft.gates, wires: draft.wires }));
+  const saved = await saveOffline(text, draft.description, source);
+  savePositions(positionsKey(saved.source), draft.positions);
+  return "/local"; // straight to the circuit's page, to try it
 }
 
 /** `#/local/new` */
@@ -155,10 +166,11 @@ export function newLocalDrawingPage(context: PageContext): void {
   openEditor(context, {
     title: "New offline circuit",
     draft: emptyDraft(),
-    saveLabel: "Save file…",
-    cancelPath: "/",
+    saveLabel: "Save",
+    saveHint: "Saves it in your library, inside the app",
+    cancelPath: "/library",
     check: checkLocal,
-    save: (draft) => saveDrawingToFile(draft, null),
+    save: (draft) => saveDrawing(draft, { kind: "new" }),
   });
 }
 
@@ -167,19 +179,26 @@ export async function editLocalDrawingPage(context: PageContext): Promise<void> 
   if (needsDesktop(context.root)) return;
   const openFile = await restoreDocument();
   if (openFile === null) {
-    context.root.append(h("p", {}, "No file is open. ", h("a", { href: "#/" }, "Back to the home screen")));
+    context.root.append(h("p", {}, "No circuit is open. ", h("a", { href: "#/library" }, "Go to the library")));
     return;
   }
-  const { circuit, path } = openFile;
+  const { circuit, source } = openFile;
+  const inFile = source.kind === "file";
   openEditor(context, {
     title: `Edit: ${circuit.name}`,
-    draft: draftFromCircuit(circuit, positionsFor(positionsKey(path), circuit.gates, circuit.wires)),
-    saveLabel: path === null ? "Save file…" : "Save",
+    draft: draftFromCircuit(
+      { ...circuit, ...(openFile.description !== undefined && { description: openFile.description }) },
+      positionsFor(positionsKey(source), circuit.gates, circuit.wires),
+    ),
+    saveLabel: "Save",
+    saveHint: inFile ? "Saves it back to its file" : "Saves it in your library, inside the app",
+    // A netlist file has no place for a description, so files don't get the field.
+    showDescription: !inFile,
     cancelPath: "/local",
     // Honest warning: the file is rewritten from the drawing, so hand-written comments are lost.
-    ...(path !== null && openFile.text.includes("#") && { note: "Saving rewrites the file from the drawing, so the comments in it won't be kept. To keep them, use “Edit netlist” instead." }),
+    ...(inFile && openFile.text.includes("#") && { note: "Saving rewrites the file from the drawing, so the comments in it won't be kept. To keep them, use “Edit netlist” instead." }),
     check: checkLocal,
-    save: (draft) => saveDrawingToFile(draft, path),
+    save: (draft) => saveDrawing(draft, source),
   });
 }
 
@@ -188,24 +207,20 @@ export async function editLocalNetlistPage(context: PageContext): Promise<void> 
   if (needsDesktop(context.root)) return;
   const openFile = await restoreDocument();
   if (openFile === null) {
-    context.root.append(h("p", {}, "No file is open. ", h("a", { href: "#/" }, "Back to the home screen")));
+    context.root.append(h("p", {}, "No circuit is open. ", h("a", { href: "#/library" }, "Go to the library")));
     return;
   }
-  const parse = async (text: string): Promise<LocalCircuit> => unwrap(await requireDesktop().parse(text));
   openNetlistEditor(context, {
     title: `Edit netlist: ${openFile.circuit.name}`,
     text: openFile.text,
-    saveLabel: openFile.path === null ? "Save file…" : "Save",
+    saveLabel: "Save",
     cancelPath: "/local",
     async check(text) {
-      const circuit = await parse(text);
+      const circuit: LocalCircuit = unwrap(await requireDesktop().parse(text));
       return describeCheck(circuit.summary, circuit.gates.length);
     },
     async save(text) {
-      const circuit = await parse(text); // never write a file that doesn't read back
-      const path = unwrap(await requireDesktop().saveFile(openFile.path, text, fileNameFor(circuit.name)));
-      if (path === null) return null;
-      setDocument({ path, text, circuit });
+      await saveOffline(text, openFile.description ?? "", openFile.source);
       return "/local";
     },
   });

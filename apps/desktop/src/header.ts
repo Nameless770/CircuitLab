@@ -1,7 +1,7 @@
 import { signOut } from "./api";
 import { desktop } from "./desktop";
 import { h } from "./dom";
-import { currentDocument, fileName } from "./offline/document";
+import { currentDocument, documentLabel } from "./offline/document";
 import { currentPath, navigate, onPageChange } from "./router";
 import { currentSession, onSessionChange } from "./session";
 
@@ -28,9 +28,9 @@ function header(): HTMLElement {
     links.push(link("/circuits?scope=shared", "Shared with me", onList("shared")));
   }
   links.push(link("/circuits?scope=public", "Public", onList("public")));
-  if (openFile !== null) {
-    links.push(link("/local", `File: ${openFile.path === null ? "unsaved" : fileName(openFile.path)}`, path.startsWith("/local")));
-  }
+  // Offline: the library, and the circuit that's open, if any.
+  if (desktop() !== null) links.push(link("/library", "Library", path.startsWith("/library")));
+  if (openFile !== null) links.push(link("/local", documentLabel(openFile), path.startsWith("/local")));
 
   // Settings only exist in the desktop app (the main process keeps them).
   const settings = desktop() === null ? null : link("/settings", "Settings", path === "/settings");

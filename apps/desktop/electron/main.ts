@@ -5,8 +5,9 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, dialog, ipcMain, net, protocol, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
-import type { AppSettings, CircuitData, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
+import type { AppSettings, CircuitData, LibrarySaveRequest, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
 import { netlistFileFromArgs, normalizeApiUrl } from "./helpers";
+import { Library } from "./library";
 import * as offline from "./offline";
 
 /**
@@ -38,6 +39,9 @@ protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: t
 
 let mainWindow: BrowserWindow | null = null;
 
+/** Offline circuits saved inside the app (library.ts). Created once the app's data folder is known. */
+let library: Library;
+
 /** The .net file the app was started with (double-clicked in Explorer), until the window takes it. */
 let startupFile = netlistFileFromArgs(process.argv);
 
@@ -56,6 +60,7 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     loadSettings();
+    library = new Library(path.join(app.getPath("userData"), "library"));
     protocol.handle("app", serveApp);
     registerIpcHandlers();
     Menu.setApplicationMenu(buildMenu());
@@ -264,6 +269,19 @@ function registerIpcHandlers(): void {
     attempt(() => offline.truthTablePage(circuit, Number(offset), Number(limit))),
   );
 
+  ipcMain.handle("circuitlab:library-list", () => attempt(() => library.list()));
+
+  ipcMain.handle("circuitlab:library-open", (_event, id: unknown) => attempt(() => library.open(String(id))));
+
+  ipcMain.handle("circuitlab:library-save", (_event, request: LibrarySaveRequest) => attempt(() => library.save(request)));
+
+  ipcMain.handle("circuitlab:library-delete", (_event, id: unknown) =>
+    attempt(async () => {
+      await library.delete(String(id));
+      return null;
+    }),
+  );
+
   ipcMain.handle("circuitlab:export-truth-table", (event, circuit: CircuitData, suggestedName: unknown) =>
     attempt(async () => {
       offline.checkExport(circuit); // fail before asking where to save
@@ -316,6 +334,7 @@ function buildMenu(): Menu {
         { type: "separator" },
         { label: "New Offline Circuit", accelerator: "CmdOrCtrl+N", click: send("new") },
         { label: "Open Netlist File…", accelerator: "CmdOrCtrl+O", click: send("open") },
+        { label: "Library", accelerator: "CmdOrCtrl+L", click: send("library") },
         { type: "separator" },
         { label: "Settings…", accelerator: "CmdOrCtrl+,", click: send("settings") },
         { type: "separator" },

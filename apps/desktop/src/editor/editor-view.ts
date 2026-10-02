@@ -20,6 +20,10 @@ export interface EditorOptions {
   readonly title: string;
   readonly draft: Draft;
   readonly saveLabel: string;
+  /** Says where Save puts the circuit (shown when the mouse is over the button). */
+  readonly saveHint?: string;
+  /** Whether to ask for a description (default true). Netlist files have no place for one. */
+  readonly showDescription?: boolean;
   readonly cancelPath: string;
   /** Shown above the editor, e.g. that saving rewrites a file. */
   readonly note?: string;
@@ -301,7 +305,7 @@ export function openEditor({ root, signal }: PageContext, options: EditorOptions
     draft.description = descriptionInput.value;
     dirty = true;
   });
-  const circuitCard = h("div", { class: "card" }, h("h3", {}, "Circuit"), field("Name", nameInput), field("Description", descriptionInput));
+  const circuitCard = h("div", { class: "card" }, h("h3", {}, "Circuit"), field("Name", nameInput), options.showDescription === false ? null : field("Description", descriptionInput));
 
   function renderSelectionCard(): void {
     const current = selection;
@@ -396,7 +400,7 @@ export function openEditor({ root, signal }: PageContext, options: EditorOptions
     });
   });
 
-  const saveButton = h("button", { class: "primary" }, options.saveLabel);
+  const saveButton = h("button", { class: "primary", title: options.saveHint }, options.saveLabel);
   saveButton.addEventListener("click", () => {
     if (draft.name.trim() === "") {
       warn("Give the circuit a name first.");

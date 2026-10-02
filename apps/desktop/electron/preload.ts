@@ -21,6 +21,10 @@ const bridge: DesktopBridge = {
   simulate: (circuit, request) => ipcRenderer.invoke("circuitlab:simulate", circuit, request),
   truthTable: (circuit, offset, limit) => ipcRenderer.invoke("circuitlab:truth-table", circuit, offset, limit),
   exportTruthTable: (circuit, suggestedName) => ipcRenderer.invoke("circuitlab:export-truth-table", circuit, suggestedName),
+  listLibrary: () => ipcRenderer.invoke("circuitlab:library-list"),
+  openFromLibrary: (id) => ipcRenderer.invoke("circuitlab:library-open", id),
+  saveToLibrary: (request) => ipcRenderer.invoke("circuitlab:library-save", request),
+  deleteFromLibrary: (id) => ipcRenderer.invoke("circuitlab:library-delete", id),
   onMenuCommand: (listener) => {
     ipcRenderer.on("circuitlab:menu", (_event, command: MenuCommand) => listener(command));
   },

@@ -14,7 +14,7 @@ import {
 } from "@circuitlab/engine";
 import { NetlistError, formatNetlist, parseNetlist } from "@circuitlab/netlist";
 import type { CircuitData, LocalCircuit, LocalProblem, LocalSimulateRequest, LocalSimulation, LocalTruthTablePage } from "./bridge";
-import { SettingError } from "./helpers";
+import { NotInLibraryError, SettingError } from "./helpers";
 
 /**
  * Offline mode: the same engine and netlist packages the API uses, called directly in the main
@@ -140,6 +140,7 @@ export function toProblem(error: unknown): LocalProblem {
     return { code: "invalid-inputs", message: "The input values don't fit the circuit.", issues: error.issues.map((issue) => ({ code: issue.code, message: issue.message })) };
   }
   if (error instanceof SettingError) return { code: "invalid-setting", message: error.message };
+  if (error instanceof NotInLibraryError) return { code: "not-found", message: error.message };
   if (error instanceof RangeError) return { code: "too-large", message: error.message };
   const code = (error as { code?: unknown }).code; // file system errors, e.g. ENOENT
   if (typeof code === "string") return { code: "file-error", message: (error as Error).message };

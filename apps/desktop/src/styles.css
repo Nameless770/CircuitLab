@@ -454,6 +454,12 @@ textarea.code {
   border-color: transparent;
 }
 
+.badge.saved {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
 .badge.loop {
   background: var(--warning-soft);
   color: var(--warning);

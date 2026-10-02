@@ -1,10 +1,12 @@
 import type { CircuitResource, Visibility } from "@circuitlab/api-contract";
 import { createCircuit, deleteCircuit, getCircuit, getNetlist, updateCircuit } from "../api";
 import { onlineBackend } from "../circuit/backend";
+import { desktop } from "../desktop";
 import { simulatorSection } from "../circuit/simulator";
 import { truthTableSection } from "../circuit/truth-table";
 import { forgetPositions, positionsFor, savePositions } from "../diagram/saved-positions";
 import { appendAll, fileNameFor, formatDate, h, plural, saveFile } from "../dom";
+import { positionsKey, saveInLibrary } from "../offline/document";
 import { jobsPanel } from "../online/jobs";
 import { runsSection } from "../online/runs";
 import { sharingSection } from "../online/sharing";
@@ -46,6 +48,16 @@ function titleBlock(circuit: CircuitResource, signedIn: boolean, isOwner: boolea
   });
 
   // Copies the circuit into your own account, e.g. to change someone else's public circuit.
+  // A copy in the app's library: it can then be opened and simulated without the server.
+  const toLibrary = h("button", {}, "Save to library");
+  toLibrary.addEventListener("click", () => {
+    void runAction(toLibrary, message, async () => {
+      const saved = await saveInLibrary(await getNetlist(circuit.id), circuit.description);
+      savePositions(positionsKey(saved.source), positionsFor(circuit.id, circuit.gates, circuit.wires));
+      message.replaceChildren(successBox(`Saved a copy of “${circuit.name}” in your library, where it works offline too.`));
+    });
+  });
+
   const copy = h("button", {}, "Make a copy");
   copy.addEventListener("click", () => {
     void runAction(copy, message, async () => {
@@ -99,6 +111,7 @@ function titleBlock(circuit: CircuitResource, signedIn: boolean, isOwner: boolea
         signedIn ? editLink("edit", "Edit drawing") : null,
         signedIn ? editLink("netlist", "Edit netlist") : null,
         download,
+        desktop() === null ? null : toLibrary,
         signedIn ? copy : null,
         isOwner ? remove : null,
       ),

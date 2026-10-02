@@ -32,11 +32,55 @@ export interface DesktopBridge {
   truthTable(circuit: CircuitData, offset: number, limit: number): Promise<LocalResult<LocalTruthTablePage>>;
   /** Asks where to save, then writes the whole truth table as CSV. Resolves to the path, or null if cancelled. */
   exportTruthTable(circuit: CircuitData, suggestedName: string): Promise<LocalResult<string | null>>;
+  /** Every circuit saved in the app's library, the most recently changed first. */
+  listLibrary(): Promise<LocalResult<readonly LibraryItem[]>>;
+  openFromLibrary(id: string): Promise<LocalResult<LibraryCircuit>>;
+  /** Adds a circuit to the library (no `id`) or replaces one (with its `id`). */
+  saveToLibrary(request: LibrarySaveRequest): Promise<LocalResult<LibraryCircuit>>;
+  deleteFromLibrary(id: string): Promise<LocalResult<null>>;
   /** Commands from the app menu ("open", "new", "home"). */
   onMenuCommand(listener: (command: MenuCommand) => void): void;
 }
 
-export type MenuCommand = "open" | "new" | "home" | "settings";
+export type MenuCommand = "open" | "new" | "home" | "library" | "settings";
+
+/**
+ * A circuit in the library: circuits saved inside the app (in its data folder), so offline work
+ * is kept without choosing a file. What the Library page lists; the netlist itself isn't needed
+ * for that, so it isn't here.
+ */
+export interface LibraryItem {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly summary: LibrarySummary;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** Kept with each saved circuit, so the Library page can show it without reading every netlist. */
+export interface LibrarySummary {
+  readonly gates: number;
+  readonly inputs: readonly string[];
+  readonly outputs: readonly string[];
+  readonly feedbackLoop: readonly string[] | null;
+}
+
+/** A library circuit, opened. */
+export interface LibraryCircuit {
+  readonly item: LibraryItem;
+  /** The circuit as netlist text: what the netlist editor shows. */
+  readonly text: string;
+  readonly circuit: LocalCircuit;
+}
+
+export interface LibrarySaveRequest {
+  /** The library circuit to replace; leave it out to add a new one. */
+  readonly id?: string;
+  /** The circuit as netlist text (from the netlist editor, a file, or a drawing via toNetlist). */
+  readonly netlist: string;
+  readonly description?: string;
+}
 
 export interface AppSettings {
   /** The API address in use right now. */

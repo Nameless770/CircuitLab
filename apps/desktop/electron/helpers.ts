@@ -3,6 +3,14 @@
  * they can be unit tested (test/helpers.test.ts).
  */
 
+/** A library circuit that doesn't exist (deleted meanwhile, or a wrong id). */
+export class NotInLibraryError extends Error {
+  constructor() {
+    super("This circuit isn't in the library any more.");
+    this.name = "NotInLibraryError";
+  }
+}
+
 /** A setting the user typed that can't be used. Its message is shown as is. */
 export class SettingError extends Error {
   constructor(message: string) {

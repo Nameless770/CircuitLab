@@ -5,7 +5,7 @@
 // It drives the window with Playwright, which can control Electron apps. The unit tests
 // (test/*.test.ts) check the logic; this checks that the screens and the pieces fit together.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
@@ -57,6 +57,8 @@ const app = await _electron.launch({ executablePath: executable, args: argsFor(n
 const page = await app.firstWindow();
 const problems = [];
 page.on("pageerror", (error) => problems.push(`page error: ${error.message}`));
+// The app asks before deleting (window.confirm): answer yes.
+page.on("dialog", (dialog) => void dialog.accept());
 page.on("console", (message) => {
   // Chromium also logs every failed request ("Failed to load resource: ... 503"). Those are
   // expected here (the app checks a server that isn't running) and the app shows them itself.
@@ -131,6 +133,12 @@ try {
     await screenshot("offline-half-adder");
   });
 
+  await step("offline: save the example in the library", async () => {
+    await page.getByRole("button", { name: "Save to library" }).click();
+    await see("In your library");
+    await screenshot("offline-in-library");
+  });
+
   await step("offline: an SR latch remembers", async () => {
     await go("#/");
     await page.getByRole("button", { name: "SR latch" }).click();
@@ -146,7 +154,7 @@ try {
   });
 
   const savedFile = path.join(profileDir, "drawn.net");
-  await step("offline: draw a circuit and save it as a file", async () => {
+  await step("offline: draw a circuit, save it (no file dialog), export a copy", async () => {
     await go("#/local/new");
     await see("New offline circuit");
     for (const label of ["Input", "Input", "AND", "Output"]) await page.locator(".palette button", { hasText: new RegExp(`^${label}$`) }).click();
@@ -158,16 +166,49 @@ try {
     await wire("and1", "Y", 0);
     await page.getByRole("button", { name: "Check" }).click();
     await see("Looks good");
+    await page.getByLabel("Name").first().fill("My AND gate");
+    await page.getByLabel("Description").fill("Two inputs, one output.");
     await screenshot("offline-editor");
-    // The Save dialog is the operating system's: answer it from the main process instead.
+    // Save goes straight into the library and on to the circuit's page, ready to try.
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await see("Simulated on this computer.");
+    await see("In your library");
+    await see("Two inputs, one output.");
+    await screenshot("offline-saved");
+    // A file only when asked: the Save dialog is the operating system's, so answer it from the main process.
     await app.evaluate(({ dialog }, file) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: file });
     }, savedFile);
-    await page.getByRole("button", { name: "Save file…" }).click();
-    await see("Simulated on this computer.");
+    await page.getByRole("button", { name: "Export as file…" }).click();
+    await see("Exported to");
     assert.ok(existsSync(savedFile), "the file was written");
     assert.match(readFileSync(savedFile, "utf8"), /and1 = AND\(A, B\)/);
-    await screenshot("offline-saved");
+  });
+
+  await step("offline: the library lists, searches, opens and deletes", async () => {
+    await go("#/library");
+    await page.locator(".circuit-card").nth(1).waitFor();
+    assert.equal(await page.locator(".circuit-card").count(), 2);
+    assert.equal(await page.locator(".circuit-card h3").first().textContent(), "My AND gate"); // newest first
+    await screenshot("library");
+    await page.getByLabel("Search by name").fill("half");
+    assert.equal(await page.locator(".circuit-card").count(), 1);
+    await page.locator(".circuit-card", { hasText: "Half adder" }).click();
+    await page.locator("h1", { hasText: "Half adder" }).waitFor();
+    await see("In your library");
+    // Delete the other one, from its own page.
+    await go("#/library");
+    await page.locator(".circuit-card", { hasText: "My AND gate" }).click();
+    await page.locator("h1", { hasText: "My AND gate" }).waitFor();
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page.waitForFunction(() => location.hash === "#/library");
+    await page.locator(".circuit-card").first().waitFor();
+    assert.equal(await page.locator(".circuit-card").count(), 1);
+    // The home screen lists the library too, one click away.
+    await go("#/");
+    await page.locator(".recent a", { hasText: "Half adder" }).waitFor();
+    // On disk: one JSON file per saved circuit, in the profile's library folder.
+    assert.deepEqual(readdirSync(path.join(profileDir, "library")).filter((name) => name.endsWith(".json")).length, 1);
   });
 
   // ----------------------------------------------------------------------------------- online
@@ -230,8 +271,17 @@ try {
     await screenshot("online-edited");
   });
 
-  await step("online: upload an offline file to the account", async () => {
-    await go("#/local");
+  await step("online: save a copy of a server circuit in the library", async () => {
+    await page.getByRole("button", { name: "Save to library" }).click();
+    await see("Saved a copy");
+    await go("#/library");
+    await page.locator(".circuit-card", { hasText: "Full adder" }).waitFor();
+  });
+
+  await step("online: upload a library circuit to the account", async () => {
+    await go("#/library");
+    await page.locator(".circuit-card", { hasText: "Half adder" }).click();
+    await page.locator("h1", { hasText: "Half adder" }).waitFor();
     await page.getByRole("button", { name: "Upload to my account" }).click();
     await see("Simulated by the server.");
     assert.notEqual(await page.evaluate(() => location.hash), circuitHash);

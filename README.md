@@ -187,8 +187,9 @@ The home screen offers two modes:
 - **Online:** register or sign in, then make circuits (draw them, write a netlist, upload a
   file, or start from an example), share them, make them public, and let the server compute big
   truth tables in the background. It shows whether the server is reachable.
-- **Offline:** open, draw and save `.net` files on your computer, simulated by the app itself.
-  No account or server needed. File > Open (Ctrl+O) works from anywhere.
+- **Offline:** draw circuits and save them in the app's **library**, with no file dialog;
+  the Library page (Ctrl+L) lists them all. Simulated by the app itself, so no account or server
+  is needed. `.net` files work too: File > Open (Ctrl+O), Import, and Export.
 
 In both modes, click a circuit's inputs to switch them and watch the wires light up. A circuit with
 a feedback loop (a latch) runs step by step and remembers its state. Truth tables page through
@@ -273,7 +274,7 @@ development.
 
 ## Testing
 
-`npm test` runs 753 tests in about 25 seconds (Docker must be running, for Redis).
+`npm test` runs 762 tests in about 25 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.
