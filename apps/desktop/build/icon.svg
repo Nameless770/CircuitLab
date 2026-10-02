@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- The app icon: an AND gate whose output carries a 1 (the green dot). scripts/make-icon.cjs turns it into icon.png. -->
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1e3a8a"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#background)"/>
+  <path d="M150 136 H262 A120 120 0 0 1 262 376 H150 Z" fill="none" stroke="#ffffff" stroke-width="34" stroke-linejoin="round"/>
+  <path d="M74 196 H150 M74 316 H150 M382 256 H430" stroke="#ffffff" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="436" cy="256" r="32" fill="#4ade80"/>
+</svg>

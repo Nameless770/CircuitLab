@@ -35,9 +35,16 @@ const bob = { displayName: "Bob", email: `bob.${Date.now()}@example.test`, passw
 
 // A throwaway profile: the test signs in and opens files, and none of that may show up in your app.
 const profileDir = mkdtempSync(path.join(tmpdir(), "circuitlab-smoke-profile-"));
+
+// `--packaged` tests the app electron-builder made (release/win-unpacked/CircuitLab.exe, the
+// same files the installer installs) instead of running Electron on this folder.
+const packaged = process.argv.includes("--packaged");
+const packagedExe = path.join(appDir, "release", "win-unpacked", "CircuitLab.exe");
+if (packaged && !existsSync(packagedExe)) throw new Error(`${packagedExe} doesn't exist: run npm run package:desktop first.`);
+console.log(`Testing ${packaged ? packagedExe : "the build in dist/"}`);
 const app = await _electron.launch({
-  executablePath: String(electronPath),
-  args: [appDir],
+  executablePath: packaged ? packagedExe : String(electronPath),
+  args: packaged ? [] : [appDir],
   env: { ...process.env, CIRCUITLAB_API_URL: apiUrl, CIRCUITLAB_USER_DATA_DIR: profileDir },
 });
 const page = await app.firstWindow();

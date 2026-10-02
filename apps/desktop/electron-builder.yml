@@ -1,0 +1,34 @@
+# How `npm run package:desktop` turns the app into a Windows installer (electron-builder).
+appId: org.circuitlab.desktop
+productName: CircuitLab
+copyright: Copyright © 2026 Mahmoud Khaled
+
+directories:
+  output: release # the installer ends up in apps/desktop/release/
+  buildResources: build # icon.png
+
+# Reuse the Electron that `npm install` already downloaded instead of downloading it again.
+electronDist: ../../node_modules/electron/dist
+
+# Only the built app goes in: the window (dist/renderer) and the main process (dist/electron),
+# which already contains the engine and netlist code (vite.main.config.mts). No sources, tests or
+# node_modules. Source maps stay, so error stack traces point at real lines.
+files:
+  - dist/renderer/**
+  - dist/electron/**
+  - package.json
+
+win:
+  target:
+    - target: nsis # the classic Windows setup wizard
+      arch: [x64]
+  icon: build/icon.png # converted to the .ico Windows wants
+
+nsis:
+  oneClick: false # a normal wizard, where you can choose the folder
+  allowToChangeInstallationDirectory: true
+  perMachine: false # installs for you only, so it needs no administrator rights
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: CircuitLab
+  artifactName: CircuitLab-Setup-${version}.${ext}

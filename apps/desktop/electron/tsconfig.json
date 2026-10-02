@@ -1,14 +1,15 @@
 {
-  // The Electron main process and preload script: Node code, compiled to CommonJS like the rest
-  // of the repo (`tsc -b` from the root builds it too). The window's code has its own tsconfig
-  // (../tsconfig.json) and is built by Vite.
+  // The Electron main process and preload script (Node code). tsc only type-checks them; Vite
+  // builds them into dist/electron/ with the engine and netlist bundled in (vite.main.config.mts),
+  // so the installed app needs no node_modules. The window's code has its own tsconfig
+  // (../tsconfig.json).
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
-    "outDir": "../dist/electron",
-    "tsBuildInfoFile": "../dist/electron/.tsbuildinfo",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
     "types": ["node"]
   },
-  "include": ["*.ts"],
-  "references": [{ "path": "../../../packages/engine" }, { "path": "../../../packages/netlist" }]
+  "include": ["*.ts"]
 }

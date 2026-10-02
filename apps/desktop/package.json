@@ -4,23 +4,25 @@
   "version": "0.1.0",
   "private": true,
   "description": "CircuitLab as a desktop app (Electron): your circuits on the API when signed in, or netlist files offline",
+  "author": "Mahmoud Khaled",
   "main": "dist/electron/main.js",
   "scripts": {
-    "dev": "tsc -b electron && node scripts/dev.mjs",
-    "build": "tsc -p . && tsc -b electron && vite build",
+    "dev": "tsc -p electron && vite build --config vite.main.config.mts && node scripts/dev.mjs",
+    "build": "tsc -p . && tsc -p electron && vite build && vite build --config vite.main.config.mts",
     "start": "npm run build && electron .",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "typecheck": "tsc -p ."
-  },
-  "dependencies": {
-    "@circuitlab/engine": "^0.1.0",
-    "@circuitlab/netlist": "^0.1.0"
+    "package": "npm run build && electron-builder --win",
+    "smoke:packaged": "node scripts/smoke.mjs --packaged",
+    "typecheck": "tsc -p . && tsc -p electron"
   },
   "devDependencies": {
     "@circuitlab/api": "^0.1.0",
     "@circuitlab/api-contract": "^0.1.0",
+    "@circuitlab/engine": "^0.1.0",
+    "@circuitlab/netlist": "^0.1.0",
     "@types/node": "^24.0.0",
-    "electron": "^44.5.1",
+    "electron": "44.5.1",
+    "electron-builder": "^26.15.3",
     "playwright-core": "^1.63.0",
     "vite": "^8.3.1"
   }

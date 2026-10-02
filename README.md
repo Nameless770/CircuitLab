@@ -18,7 +18,7 @@ done:
 Outside the roadmap, there is also a **desktop app** (Electron) to use all of it with a mouse: online
 with your account on the API, or offline with netlist files. See [the desktop app](#the-desktop-app).
 
-Everything compiles to CommonJS, except the desktop app's window, which Vite bundles.
+Everything compiles to CommonJS with tsc, except the desktop app, which Vite bundles.
 
 ```
 packages/engine/        @circuitlab/engine        data model, validation, sorting, simulation, truth tables
@@ -69,6 +69,7 @@ npm run start:worker   # phase 10: a worker process that computes truth-table jo
 npm run dev:desktop    # the desktop app, with hot reload (run start:api too, for online mode)
 npm run start:desktop  # the desktop app, built as users get it
 npm run smoke:desktop  # clicks through the real desktop app (Playwright); screenshots in apps/desktop/dist/smoke/
+npm run package:desktop # the Windows installer: apps/desktop/release/CircuitLab-Setup-0.1.0.exe
 npm run lint:api       # checks openapi.yaml (Redocly, fetched on first use)
 npm run db:start       # phase 6: a local PostgreSQL 18 on port 5433, nothing to install (leave it running)
 npm run db:migrate     # phase 6: applies the migrations (prisma migrate deploy)
@@ -189,9 +190,13 @@ The home screen offers two modes:
 - **Offline:** open, draw and save `.net` files on your computer, simulated by the app itself.
   No account or server needed. File > Open (Ctrl+O) works from anywhere.
 
-In both, click a circuit's inputs to switch them and watch the wires light up. A circuit with
+In both modes, click a circuit's inputs to switch them and watch the wires light up. A circuit with
 a feedback loop (a latch) runs step by step and remembers its state. Truth tables page through
 any size, and export to CSV.
+
+To install it like any other program, run `npm run package:desktop` and run
+`apps/desktop/release/CircuitLab-Setup-0.1.0.exe`. It isn't code-signed yet, so Windows asks
+first: "More info", then "Run anyway".
 
 [docs/desktop-app.md](docs/desktop-app.md) explains how it works and why, and lists its known
 shortcuts. In short:

@@ -5,3 +5,4 @@ dist/
 packages/database/src/generated/
 .env
 coverage/
+release/

@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run generate -w @circuitlab/database && tsc -b",
-    "test": "npm run build && tsc -p tsconfig.test.json && tsc -p apps/desktop && vitest run",
+    "test": "npm run build && tsc -p tsconfig.test.json && npm run typecheck -w @circuitlab/desktop && vitest run",
     "test:coverage": "npm run build && vitest run --coverage",
     "test:watch": "vitest",
     "clean": "tsc -b --clean",
@@ -24,6 +24,7 @@
     "dev:desktop": "npm run build && npm run dev -w @circuitlab/desktop",
     "start:desktop": "npm run build && npm run start -w @circuitlab/desktop",
     "smoke:desktop": "npm run build && npm run smoke -w @circuitlab/desktop",
+    "package:desktop": "npm run build && npm run package -w @circuitlab/desktop",
     "demo:http": "npm run build && node examples/dist/http-demo.js",
     "demo:auth": "npm run build && node examples/dist/auth-demo.js",
     "demo:patterns": "npm run build && node examples/dist/patterns-demo.js",

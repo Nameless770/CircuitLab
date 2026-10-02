@@ -12,6 +12,7 @@ logic circuits, switch their inputs, and watch the signals. It has two modes:
 npm run dev:desktop     # develop: the app with hot reload (start the API too for online mode)
 npm run start:desktop   # build it and run it as users would get it
 npm run smoke:desktop   # click through the real app automatically (screenshots in apps/desktop/dist/smoke/)
+npm run package:desktop # make the Windows installer: apps/desktop/release/CircuitLab-Setup-0.1.0.exe
 ```
 
 Online mode needs the API: `npm run start:api` (it listens on port 3000). To use another server,
@@ -45,7 +46,8 @@ set `CIRCUITLAB_API_URL` before starting the app.
 mode uses `@circuitlab/engine` and `@circuitlab/netlist` exactly as they are, the same code the
 API runs. The window is Chromium, so the screens are ordinary HTML, CSS and TypeScript.
 
-**What it costs.** Electron ships its own copy of Chromium, so the app is big (about 100 MB).
+**What it costs.** Electron ships its own copy of Chromium, so the installer is big (111 MB, of
+which our own code is about 340 KB).
 Tauri makes much smaller apps, but its back end is Rust, which would mean rewriting the engine or
 running Node beside it.
 
@@ -144,6 +146,36 @@ After a simulation, a wire is green when it carries a 1.
   codes as the API (`invalid-netlist`, `feedback-loop`, ...). The window shows both kinds of
   error the same way.
 
+### 10. The installer
+
+```bash
+npm run package:desktop
+```
+
+This makes `apps/desktop/release/CircuitLab-Setup-0.1.0.exe`: the usual Windows setup wizard
+(NSIS), with Start-menu and desktop shortcuts and an uninstaller in "Apps & features". It
+installs for the current user only, so it needs no administrator rights.
+
+- **The main process is bundled** ([vite.main.config.mts](../apps/desktop/vite.main.config.mts)).
+  - **The problem:** in this repo, `@circuitlab/engine` and `@circuitlab/netlist` are workspace
+    links in `node_modules`, and an installed app has no repo around it.
+  - **The fix:** Vite copies their code into `dist/electron/main.js`, the same way it bundles the
+    window's code. So the app needs no `node_modules` at all.
+  - **What's left for tsc:** it only type-checks the Electron side now.
+- **Only built files go in** ([electron-builder.yml](../apps/desktop/electron-builder.yml)):
+  `dist/renderer`, `dist/electron` and `package.json`. No sources and no tests.
+- **Electron's version is pinned** (`44.5.1`, not `^44.5.1`). The installer contains Electron
+  itself, so it must be the exact version we tested; electron-builder refuses a range.
+- **The icon** is [build/icon.svg](../apps/desktop/build/icon.svg), turned into `icon.png` by
+  Electron itself (`npx electron scripts/make-icon.cjs`).
+- **Testing the result.** `npm run smoke:packaged -w @circuitlab/desktop` runs the same 11-step
+  smoke test against `release/win-unpacked/CircuitLab.exe`, which holds exactly the files the
+  installer installs.
+
+**It isn't code-signed,** so the first time you run the installer Windows shows "Windows
+protected your PC". Click "More info", then "Run anyway". Signing needs a code-signing
+certificate, which costs money and needs a verified identity; see the known shortcuts below.
+
 ## Testing
 
 - **Unit tests** (`apps/desktop/test`, run by `npm test`): the layout, the editing rules, offline
@@ -170,5 +202,8 @@ Things I chose not to do yet, and why:
 | Offline simulation runs in the main process, so a huge page of rows could freeze the app briefly | A page is at most 4,096 rows; normal circuits take milliseconds | Run it on `@circuitlab/runner`'s worker threads, like the API |
 | The drawing editor has no undo and no zoom, and stops at 400 gates | Big circuits can be edited as netlist text | Undo stack; zoom with the SVG viewBox |
 | Saving a drawing to a file rewrites it, losing comments | The app warns before you do it; "Edit netlist" keeps the text exactly | Keep comments by editing the text instead of rewriting it |
-| No installer yet: you run it with npm | Fine while developing | electron-builder to make an `.exe` installer |
-| The API's address is only set with an environment variable | One server for now | A settings screen |
+| The installer isn't code-signed, so Windows SmartScreen warns before running it | Fine for a demo; signing needs a paid certificate and a verified identity | A code-signing certificate (or Azure Trusted Signing), set up in electron-builder |
+| No automatic updates: a new version means running a new installer | Releases are rare | electron-updater, with the installers published somewhere it can check |
+| Double-clicking a `.net` file doesn't open it in CircuitLab | File > Open works | `fileAssociations` in electron-builder.yml, plus opening the file the app was started with |
+| The API's address is only set with an environment variable, which is awkward for an installed app | One local server for now | A settings screen |
+| Only Windows is packaged | It's the machine I have | `mac` and `linux` targets in electron-builder.yml, built on those systems |
