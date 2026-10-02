@@ -36,14 +36,14 @@
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.10.0",
-    "@prisma/client": "7.10.0"
+    "@prisma/client": "7.10.0",
+    "prisma": "7.10.0"
   },
   "devDependencies": {
     "@circuitlab/engine": "^0.1.0",
     "@circuitlab/netlist": "^0.1.0",
     "@electric-sql/pglite": "^0.5.8",
     "@electric-sql/pglite-socket": "^0.2.11",
-    "@types/node": "^24.0.0",
-    "prisma": "7.10.0"
+    "@types/node": "^24.0.0"
   }
 }

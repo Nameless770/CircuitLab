@@ -1,0 +1,107 @@
+# One command starts all of CircuitLab:
+#
+#   docker compose up --build
+#
+# Then the API answers on http://localhost:3000 (try http://localhost:3000/health), and the
+# desktop app's online mode uses it as it is. Stop everything with Ctrl+C or `docker compose down`;
+# the data stays in two Docker volumes until `docker compose down --volumes`.
+#
+# Settings, from a .env file next to this one if there is one (see .env.example):
+#   JWT_SECRET         keeps people signed in when the API restarts (without it the API makes a
+#                      random key at every start). At least 32 characters.
+#   POSTGRES_PASSWORD  the database password (default: circuitlab). The database can only be
+#                      reached from inside these containers, never from your network.
+#   API_PORT           the port the API gets on this computer (default 3000).
+
+name: circuitlab
+
+services:
+  # PostgreSQL 18: circuits, accounts, simulation runs.
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: circuitlab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-circuitlab}
+      POSTGRES_DB: circuitlab
+    volumes:
+      # PostgreSQL 18 images keep their data in /var/lib/postgresql/18/docker, so the volume goes on
+      # /var/lib/postgresql (older images, and most tutorials, use .../data).
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U circuitlab -d circuitlab"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # Redis 8: the result cache, the sign-in throttle, and the queue of background jobs.
+  redis:
+    image: redis:8-alpine
+    # Append-only file: queued and finished jobs survive a restart of Redis.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # Applies the database migrations (prisma migrate deploy), then exits. The API refuses to start on
+  # a database that isn't migrated, so it waits for this to finish.
+  migrate:
+    build: .
+    image: circuitlab
+    command: ["npm", "run", "migrate", "--workspace", "@circuitlab/database"]
+    environment:
+      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:-circuitlab}@postgres:5432/circuitlab
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # The REST API (phases 4 to 10).
+  api:
+    build: .
+    image: circuitlab
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:-circuitlab}@postgres:5432/circuitlab
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-}
+      # Background truth-table jobs go to the worker below, so big tables never slow the API down.
+      JOB_CONCURRENCY: "0"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl, but it has Node, whose fetch() can call /health.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # Computes background truth-table jobs from the Redis queue (phase 10's worker process).
+  worker:
+    build: .
+    image: circuitlab
+    command: ["node", "apps/api/dist/worker.js"]
+    environment:
+      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:-circuitlab}@postgres:5432/circuitlab
+      REDIS_URL: redis://redis:6379
+      JOB_CONCURRENCY: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

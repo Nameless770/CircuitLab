@@ -1,6 +1,6 @@
 # CircuitLab
 
-A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 10 are
+A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 11 are
 done:
 - **Phase 1:** a pure TypeScript engine.
 - **Phase 2:** streaming netlist import, and simulation on worker threads.
@@ -14,9 +14,11 @@ done:
   mode that runs latches and flip-flops), and dependency injection throughout.
 - **Phase 10:** Redis: cached simulation results, truth tables too big for one response as
   background jobs (BullMQ), and a sign-in throttle shared by every API instance.
+- **Phase 11:** Docker: `docker compose up` starts it all (PostgreSQL, Redis, the migrations, the
+  API and a worker).
 
 Outside the roadmap, there is also a **desktop app** (Electron) to use all of it with a mouse: online
-with your account on the API, or offline with netlist files. See [the desktop app](#the-desktop-app).
+with your account on the API, or offline with circuits saved in the app itself. See [the desktop app](#the-desktop-app).
 
 Everything compiles to CommonJS with tsc, except the desktop app, which Vite bundles.
 
@@ -36,6 +38,9 @@ docs/testing.md         how it is tested, and what the tests found
 docs/design-patterns.md the patterns in the code, and why each one is there
 docs/caching-and-jobs.md the result cache, background jobs, and what lives in Redis
 docs/desktop-app.md     the desktop app: how it works, the decisions, and its known shortcuts
+docs/docker.md          phase 11: what runs in Docker, and why it's built this way
+Dockerfile              the API's image (also runs the worker and the migrations)
+docker-compose.yml      PostgreSQL, Redis, the migrations, the API and a worker: `docker compose up`
 examples/               demos, and sample netlists in examples/netlists/
 */test/                 each package's tests (Vitest)
 ```
@@ -53,6 +58,7 @@ examples/               demos, and sample netlists in examples/netlists/
 
 ```bash
 npm install
+docker compose up --build  # phase 11: everything at once (API on http://localhost:3000), see docs/docker.md
 npm run build          # tsc -b: builds every package, then the examples
 npm test               # phase 8: builds, type-checks the tests, runs all of them (needs Docker running, for Redis)
 npm run test:coverage  # the same, with a coverage report in coverage/
@@ -81,6 +87,18 @@ npm run clean
 ```
 
 ## Running the API
+
+The quickest way, with PostgreSQL and Redis as production uses them, is Docker (phase 11):
+
+```bash
+docker compose up --build
+```
+
+That starts PostgreSQL, Redis, the migrations, the API on http://localhost:3000, and a worker for
+background jobs. [docs/docker.md](docs/docker.md) explains what runs and why. Put a `JWT_SECRET` in
+`.env` to stay signed in when the API restarts.
+
+Without Docker:
 
 ```bash
 npm run start:api
@@ -418,7 +436,7 @@ await pool.close();                             // waits for running tasks; dest
 | 8 | Testing | Engine unit tests and API integration tests | Done |
 | 9 | Design patterns | Gate factory, strategy pattern for simulation modes, dependency injection | Done |
 | 10 | Redis and queues | Cached results; large truth tables as BullMQ jobs | Done |
-| 11 | Docker | `docker-compose up` starts the API, Postgres, and Redis | |
+| 11 | Docker | `docker-compose up` starts the API, Postgres, and Redis | Done |
 | 12 | System design | Design document for scaling to thousands of users | |
 | 13 | Polish | README, architecture diagram, Swagger, deployed demo | |
 

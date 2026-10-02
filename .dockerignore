@@ -1,0 +1,17 @@
+# What Docker never copies into the image (COPY . . in the Dockerfile).
+
+# Built inside the image instead; copies from Windows wouldn't even run on Linux.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+packages/database/src/generated
+
+# Secrets stay out of images: settings come from docker-compose.yml and .env at run time.
+.env
+
+# Big, or nothing to do with the API.
+.git
+.data
+coverage
+apps/desktop/release
+.claude

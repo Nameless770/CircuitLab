@@ -140,6 +140,6 @@ The in-memory storage follows the same rules, and the same integration tests run
 | What | When |
 | --- | --- |
 | Email verification, password reset, changing a password, "sign out everywhere" | Not on the roadmap yet; the `sessions` table already supports the last |
-| `trust proxy`, so the throttle sees the client's address rather than the reverse proxy's | Phase 11 |
+| `trust proxy`, so the throttle sees the client's address rather than the reverse proxy's | Phase 13, when the deployed API gets a reverse proxy. Phase 11's Docker setup has none: its port forwarding passes on no client address (see [docker.md](docker.md#known-shortcuts)) |
 | A grace period for two browser tabs refreshing the same token at the same moment (today the second one ends the session) | If it bothers users |
 | A list of common passwords to refuse, as NIST also asks | With the account settings above |
