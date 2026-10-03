@@ -83,7 +83,7 @@ strategy, not changes to them.
 
 **The state lives with the client, not the server.** Each request is one step. The answer carries
 `state`, and the client sends it back with the next step. The server keeps no sessions of
-simulations, and any instance can answer any step, which matters once there are several (phase 12).
+simulations, and any instance can answer any step, which matters once there are several (phase 12 builds on it: [system-design.md](system-design.md#2-what-runs-today)).
 
 **What can go wrong, and the answers:**
 - **A loop that never settles.** An odd ring of inverters oscillates, in reality as here. Each loop

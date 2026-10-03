@@ -259,8 +259,10 @@ Each is tested, by stopping and freezing a real Redis in Docker (`redis.test.ts`
 
 - **`Idempotency-Key` for other POSTs.** Jobs don't need it (the same request gets the same job),
   but creating a circuit twice by retrying still makes two circuits.
-- **Rate limits on the whole API**, with `RateLimit` headers: better decided with the system
-  design (phase 12), where a gateway can enforce them before requests reach the API.
-- **Results in object storage (S3)** when Redis memory becomes the limit (phase 12).
+- **Rate limits on the whole API**, with `RateLimit` headers: designed in phase 12, for a gateway to
+  enforce before requests reach the API ([system-design.md](system-design.md#stage-2-several-api-copies-behind-a-load-balancer)).
+- **Results in object storage (S3)** when Redis memory becomes the limit: designed in phase 12
+  ([system-design.md](system-design.md#stage-4-workers-and-results)), together with a memory limit for
+  Redis and the cache on a Redis of its own (`REDIS_CACHE_URL`).
 
 Phase 3's plan put the first two in phase 10. They were moved, not forgotten.

@@ -1,6 +1,6 @@
 # CircuitLab
 
-A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 11 are
+A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 12 are
 done:
 - **Phase 1:** a pure TypeScript engine.
 - **Phase 2:** streaming netlist import, and simulation on worker threads.
@@ -16,6 +16,8 @@ done:
   background jobs (BullMQ), and a sign-in throttle shared by every API instance.
 - **Phase 11:** Docker: `docker compose up` starts it all (PostgreSQL, Redis, the migrations, the
   API and a worker).
+- **Phase 12:** system design: how CircuitLab would serve thousands of users, from measurements (what
+  one container handles, what breaks first, and the fixes in order).
 
 Outside the roadmap, there is also a **desktop app** (Electron) to use all of it with a mouse: online
 with your account on the API, or offline with circuits saved in the app itself. See [the desktop app](#the-desktop-app).
@@ -39,6 +41,8 @@ docs/design-patterns.md the patterns in the code, and why each one is there
 docs/caching-and-jobs.md the result cache, background jobs, and what lives in Redis
 docs/desktop-app.md     the desktop app: how it works, the decisions, and its known shortcuts
 docs/docker.md          phase 11: what runs in Docker, and why it's built this way
+docs/system-design.md   phase 12: scaling to thousands of users, with the measurements behind it
+scripts/load/           the load, scale-out and job-timing scripts behind that document
 Dockerfile              the API's image (also runs the worker and the migrations)
 docker-compose.yml      PostgreSQL, Redis, the migrations, the API and a worker: `docker compose up`
 examples/               demos, and sample netlists in examples/netlists/
@@ -437,7 +441,7 @@ await pool.close();                             // waits for running tasks; dest
 | 9 | Design patterns | Gate factory, strategy pattern for simulation modes, dependency injection | Done |
 | 10 | Redis and queues | Cached results; large truth tables as BullMQ jobs | Done |
 | 11 | Docker | `docker-compose up` starts the API, Postgres, and Redis | Done |
-| 12 | System design | Design document for scaling to thousands of users | |
+| 12 | System design | Design document for scaling to thousands of users | Done |
 | 13 | Polish | README, architecture diagram, Swagger, deployed demo | |
 
 ## Tooling notes

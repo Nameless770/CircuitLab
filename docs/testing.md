@@ -204,7 +204,9 @@ too; see [design-patterns.md](design-patterns.md).
 
 ## Not covered
 
-- **Load and performance:** phase 12's system design.
+- **Load and performance:** measured by hand in phase 12, not by `npm test`: load numbers depend on
+  the machine, so a test with a threshold would fail on a slow day. The scripts are in `scripts/load`,
+  and the results in [system-design.md](system-design.md).
 - **A browser front end:** phase 13, if there is one.
 - **Continuous integration:** a workflow running `npm test` (with Docker) and `npm run db:check`
   on every push fits phase 11, next to Docker.

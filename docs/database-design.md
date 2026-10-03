@@ -388,7 +388,9 @@ was designed for it in phase 5, so the migration only adds an index. How the job
 
 ## For the next phases
 
-**Phase 12 (scale)**
+**Phase 12 (scale)**, designed in [system-design.md](system-design.md#stage-3-protect-the-database), with measurements:
+- **Measured:** a history row is about 360 bytes for a small circuit, so 100 simulations a second for
+  8 hours a day is about 31 GB a month.
 - **`simulation_runs` grows fastest.** It needs a retention policy, and at large scale it can be
   partitioned by month, so dropping old history is instant.
 - **Reads:** circuit reads can go to read replicas.

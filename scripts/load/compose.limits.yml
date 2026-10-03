@@ -1,0 +1,15 @@
+# Settings for the phase 12 measurements (docs/system-design.md), laid over docker-compose.yml:
+#
+#   docker compose -p circuitlab-load -f docker-compose.yml -f scripts/load/compose.limits.yml up -d --wait
+#
+# Each API and worker container gets 2 CPUs, like a small production container, and the API no
+# published port: the load script runs inside the Compose network. Needs Compose 2.24 or later
+# (`!reset`).
+services:
+  api:
+    ports: !reset []
+    cpus: 2
+    mem_limit: 768m
+  worker:
+    cpus: 2
+    mem_limit: 1g

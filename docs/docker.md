@@ -148,7 +148,7 @@ On Docker Desktop 4.88 (engine 29.7), over HTTP, as any client would:
 | --- | --- | --- |
 | The image is about 870 MB, about 150 MB of it Prisma's CLI and Studio, kept for migrations | One image is simpler, and disk space on a laptop is cheap | A separate small image for `migrate` |
 | Every client looks like Docker's own network address to the API, so the sign-in throttle counts all clients as one | On your own computer you *are* the only client | When deploying (phase 13): a reverse proxy in front that passes on the client's address, and Express's `trust proxy` setting for it |
-| Without `JWT_SECRET` in `.env`, restarting the API signs everyone out | One command still starts everything, with no setup | Set it in `.env` (generate one as `.env.example` shows) |
+| Without `JWT_SECRET` in `.env`, restarting the API signs everyone out, and a second API copy would answer 401 to the first one's tokens ([measured](system-design.md#are-the-copies-interchangeable)) | One command still starts everything, with no setup | Set it in `.env` (generate one as `.env.example` shows) |
 | Code changes need `docker compose up --build` | Rebuilding takes seconds once the dependencies are cached | Fine as it is; day-to-day development uses `npm run start:api` |
 | npm warns that the install scripts of `argon2`, `prisma` and two others aren't approved yet | They still run: Prisma's engine is in the image. The warning is about a future npm default | Approve them (`npm install-scripts approve`) when that npm version arrives |
 | The base images float (`node:24-slim`, `postgres:18-alpine`), so a rebuild can pick up a newer patch release | Patches are what you want for security | Pin image digests if builds must be exactly repeatable |
