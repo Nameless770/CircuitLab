@@ -19,7 +19,9 @@ The OpenAPI document is written first and is the single source of truth:
 - **The tests prove the responses match it.** Every response in the integration tests (phase 8) is
   checked against the spec: its status must be documented for that operation, and its body must
   match the schema given for that status. See [testing.md](testing.md).
-- **Phase 13 serves it** with Swagger UI, rather than generating documentation from code.
+- **The API serves it.** Swagger UI at `/docs` shows the spec and `/openapi.json` serves it (phase 13),
+  rather than generating documentation from code. The served copy names a relative server, `/v1`, so
+  "Try it out" calls whichever server the page is open on.
 
 `@circuitlab/api-contract` holds the spec and the framework-free code that enforces it.
 Phase 4 wires it into NestJS, and phases 5 and 6 add storage.
@@ -109,7 +111,7 @@ away.
 | 412 | `precondition-failed` (stale `If-Match`) |
 | 413 | `content-too-large` |
 | 422 | `invalid-circuit`, `invalid-netlist`, `invalid-inputs`, `feedback-loop`, `does-not-settle` (sequential mode), `too-many-inputs`, `computation-too-large`, `invalid-fields` (account and sharing bodies) |
-| 429 | `too-many-requests` (failed sign-ins, or too many truth-table jobs), with `Retry-After` |
+| 429 | `too-many-requests` (failed sign-ins, too many sign-ins or registrations from one address, or too many truth-table jobs), with `Retry-After` |
 | 500 | `internal-error`: the body never reveals details; the server logs them |
 | 503 | `server-busy` and `server-unavailable` (shutting down, or the database or Redis is unreachable), with `Retry-After`; `simulation-timeout` |
 
@@ -196,4 +198,4 @@ Simulations run on a fixed pool of worker threads (phase 2).
 | 7 | Done: JWT authentication, `visibility`, and sharing, as planned. A circuit you may not see answers 404, not 403. See [auth-design.md](auth-design.md) |
 | 9 | Done: `mode` and `state` on `simulate`, `mode` on responses and recorded runs, and 422 `does-not-settle`. All additions: a client that never sends `mode` sees the same API, plus a `mode` field. See [design-patterns.md](design-patterns.md) |
 | 10 | Done: truth tables too large for one response as background jobs (`202 Accepted`, a job URL to poll, 409 and 410 for results that aren't there), `Cache-Status` on cached answers, and 429 for too many jobs. Two items planned here moved: `Idempotency-Key` (a retried job request already gets the same job; other POSTs later) and API-wide rate limits with `RateLimit` headers (phase 12 designed them, for a load balancer to enforce: [system-design.md](system-design.md#stage-2-several-api-copies-behind-a-load-balancer)). See [caching-and-jobs.md](caching-and-jobs.md) |
-| 13 | Swagger UI serving `openapi.yaml`, and documentation pages at each problem `type` URL |
+| 13 | Done: Swagger UI at `/docs`, the contract at `/openapi.json`, and a 429 on `register` for the optional address limit (`AUTH_RATE_LIMIT`). Not done: documentation pages at each problem `type` URL |

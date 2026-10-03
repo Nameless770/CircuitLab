@@ -1,26 +1,127 @@
 # CircuitLab
 
-A digital logic circuit simulator, built in phases (see the roadmap below). Phases 1 to 12 are
-done:
-- **Phase 1:** a pure TypeScript engine.
-- **Phase 2:** streaming netlist import, and simulation on worker threads.
-- **Phase 3:** the REST API's contract.
-- **Phase 4:** a NestJS server that serves that contract.
-- **Phase 5:** the PostgreSQL schema.
-- **Phase 6:** the API connected to PostgreSQL through Prisma, with migrations.
-- **Phase 7:** accounts, JWT sign-in, private and public circuits, and sharing.
-- **Phase 8:** tests: unit and integration, run with `npm test`.
-- **Phase 9:** design patterns: a gate registry and factory, simulation strategies (a sequential
-  mode that runs latches and flip-flops), and dependency injection throughout.
-- **Phase 10:** Redis: cached simulation results, truth tables too big for one response as
-  background jobs (BullMQ), and a sign-in throttle shared by every API instance.
-- **Phase 11:** Docker: `docker compose up` starts it all (PostgreSQL, Redis, the migrations, the
-  API and a worker).
-- **Phase 12:** system design: how CircuitLab would serve thousands of users, from measurements (what
-  one container handles, what breaks first, and the fixes in order).
+Build digital logic circuits, flip their inputs, and watch the signals flow.
 
-Outside the roadmap, there is also a **desktop app** (Electron) to use all of it with a mouse: online
-with your account on the API, or offline with circuits saved in the app itself. See [the desktop app](#the-desktop-app).
+CircuitLab is a circuit simulator in three parts: a **desktop app** for drawing and testing circuits
+(online, with an account, or offline, with nothing but the app); a **REST API** that stores circuits in
+PostgreSQL, simulates them, and serves many people at once; and the **TypeScript libraries** both are
+built on (a simulation engine, a netlist file format, a worker-thread runner). It was built as an
+internship project, in 13 phases (see the [roadmap](#roadmap)), and every phase has a document that
+explains what was built and why.
+
+<p align="center">
+  <img src="docs/images/circuit-page.png" alt="The desktop app showing a full adder: the circuit drawn with green wires where a signal is 1, its inputs and outputs, and its truth table" width="720">
+</p>
+
+## What it does
+
+- **Draw a circuit, or write it as text,** then click its inputs and watch every wire light up. The
+  gates are AND, OR, NAND, NOR, XOR, XNOR, NOT and BUF, plus constants, inputs and outputs.
+- **Truth tables of any size.** Page through them, export them as CSV, or let the server compute a
+  huge one in the background and download it when it's done.
+- **Latches and flip-flops.** A circuit with a feedback loop runs step by step and remembers its state
+  between steps.
+- **Offline or online.** Offline, circuits live in the app's library and the app simulates them
+  itself. Online, they live in your account: private, public, or shared with other people as viewers
+  or editors.
+- **A documented API.** Every endpoint is described in [openapi.yaml](packages/api-contract/openapi.yaml),
+  and the running server shows it at `/docs`, where each endpoint can be tried.
+
+<p align="center">
+  <img src="docs/images/api-docs.png" alt="The API documentation page (Swagger UI): the circuit endpoints, and the simulate endpoint expanded" width="720">
+</p>
+
+## Try it
+
+**The API and its documentation** (needs [Docker](https://docs.docker.com/get-started/get-docker/)):
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:3000: it leads to the API documentation. Use "Try it out" on `POST /auth/register`
+to make an account, then "Authorize" with the `accessToken` you get back, and every other endpoint
+works as you. [docs/docker.md](docs/docker.md) explains what that command starts.
+
+**The desktop app:**
+
+```bash
+npm install
+npm run dev:desktop
+```
+
+Offline mode needs nothing else. For online mode, have the API running too (the command above, or
+`npm run start:api`). [The desktop app](#the-desktop-app) describes both modes, and how to make an
+installer.
+
+**The libraries,** from TypeScript:
+
+```ts
+import { compileCircuit, simulate, truthTable } from "@circuitlab/engine";
+
+const compiled = compileCircuit(circuitJson);            // validates and sorts once
+simulate(compiled, { A: 1, B: 0 });                      // { outputs, signals, order }
+truthTable(compiled, { offset: 0, limit: 100 });         // one page of rows
+```
+
+[docs/libraries.md](docs/libraries.md) covers the engine, the netlist format and the worker pool.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    subgraph clients["Clients"]
+        desktop["Desktop app<br/>(Electron)"]
+        swagger["Swagger UI<br/>at /docs"]
+        tools["curl, scripts,<br/>other programs"]
+    end
+
+    offline["engine + netlist<br/>inside the app"]
+    proxy["Reverse proxy<br/>(Caddy, HTTPS)"]
+
+    subgraph server["Server (Docker Compose)"]
+        api["API<br/>(NestJS)"]
+        worker["Worker<br/>(big truth tables)"]
+        pg[("PostgreSQL<br/>accounts, circuits,<br/>run history")]
+        redis[("Redis<br/>job queue, sign-in<br/>throttle, job results")]
+        cache[("Redis<br/>result cache")]
+    end
+
+    desktop -- "online mode" --> proxy
+    desktop -. "offline mode" .-> offline
+    swagger --> proxy
+    tools --> proxy
+    proxy --> api
+    api --> pg
+    api --> redis
+    api --> cache
+    worker --> pg
+    worker --> redis
+```
+
+The API keeps nothing between requests, so any number of copies can run side by side; the worker is
+the same program started differently. The reverse proxy exists only when the API is put online
+([docs/deploy.md](docs/deploy.md)). [docs/architecture.md](docs/architecture.md) goes further, with
+the package structure and the journey of one simulation and of one background job.
+
+## Documentation
+
+| Document | What it explains |
+| --- | --- |
+| [architecture.md](docs/architecture.md) | How it fits together: what runs, which package builds on which, one request from end to end |
+| [api-design.md](docs/api-design.md) | Why the REST API looks the way it does |
+| [auth-design.md](docs/auth-design.md) | Accounts, tokens, and who may do what |
+| [database-design.md](docs/database-design.md) | Why the database looks the way it does |
+| [caching-and-jobs.md](docs/caching-and-jobs.md) | The result cache, background jobs, and what lives in Redis |
+| [design-patterns.md](docs/design-patterns.md) | The patterns in the code, and why each one is there |
+| [testing.md](docs/testing.md) | How it is tested, and what the tests found |
+| [desktop-app.md](docs/desktop-app.md) | The desktop app: how it works, the decisions, its known shortcuts |
+| [docker.md](docs/docker.md) | What runs in Docker, and why it's built this way |
+| [system-design.md](docs/system-design.md) | Scaling to thousands of users, with the measurements behind it |
+| [deploy.md](docs/deploy.md) | Putting it online: HTTPS, secrets, backups |
+| [libraries.md](docs/libraries.md) | Using the engine, the netlist reader and the worker pool as libraries |
+
+## Project layout
 
 Everything compiles to CommonJS with tsc, except the desktop app, which Vite bundles.
 
@@ -31,20 +132,14 @@ packages/netlist/       @circuitlab/netlist       reads and writes netlist files
 packages/runner/        @circuitlab/runner        SimulationPool: runs simulations on worker threads
 packages/api-contract/  @circuitlab/api-contract  openapi.yaml, plus the framework-free code that enforces it
 packages/database/      @circuitlab/database      PostgreSQL 18 migrations, schema.prisma, the Prisma Client, a local dev server
-apps/api/               @circuitlab/api           the NestJS app
+apps/api/               @circuitlab/api           the NestJS app (and the worker that shares its code)
 apps/desktop/           @circuitlab/desktop       the desktop app: electron/ (main process), src/ (the window)
-docs/api-design.md      why the API looks the way it does
-docs/database-design.md why the database looks the way it does
-docs/auth-design.md     accounts, tokens, and who may do what
-docs/testing.md         how it is tested, and what the tests found
-docs/design-patterns.md the patterns in the code, and why each one is there
-docs/caching-and-jobs.md the result cache, background jobs, and what lives in Redis
-docs/desktop-app.md     the desktop app: how it works, the decisions, and its known shortcuts
-docs/docker.md          phase 11: what runs in Docker, and why it's built this way
-docs/system-design.md   phase 12: scaling to thousands of users, with the measurements behind it
-scripts/load/           the load, scale-out and job-timing scripts behind that document
+docs/                   the design documents (see Documentation above), and docs/images/
+scripts/load/           the load, scale-out and job-timing scripts behind docs/system-design.md
 Dockerfile              the API's image (also runs the worker and the migrations)
 docker-compose.yml      PostgreSQL, Redis, the migrations, the API and a worker: `docker compose up`
+docker-compose.prod.yml laid over it to go online: HTTPS (Caddy), required secrets, memory limits
+deploy/Caddyfile        the reverse proxy's configuration
 examples/               demos, and sample netlists in examples/netlists/
 */test/                 each package's tests (Vitest)
 ```
@@ -63,6 +158,7 @@ examples/               demos, and sample netlists in examples/netlists/
 ```bash
 npm install
 docker compose up --build  # phase 11: everything at once (API on http://localhost:3000), see docs/docker.md
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build  # phase 13: on a server, behind HTTPS, see docs/deploy.md
 npm run build          # tsc -b: builds every package, then the examples
 npm test               # phase 8: builds, type-checks the tests, runs all of them (needs Docker running, for Redis)
 npm run test:coverage  # the same, with a coverage report in coverage/
@@ -99,7 +195,8 @@ docker compose up --build
 ```
 
 That starts PostgreSQL, Redis, the migrations, the API on http://localhost:3000, and a worker for
-background jobs. [docs/docker.md](docs/docker.md) explains what runs and why. Put a `JWT_SECRET` in
+background jobs. Open http://localhost:3000 for the API's documentation. [docs/docker.md](docs/docker.md)
+explains what runs and why. Put a `JWT_SECRET` in
 `.env` to stay signed in when the API restarts.
 
 Without Docker:
@@ -157,6 +254,8 @@ curl "http://localhost:3000/v1/circuits/<id>/truth-table" -H "Authorization: Bea
 | `REDIS_PREFIX` | `circuitlab` | Prefix of every Redis key |
 | `CACHE_TTL_SECONDS` | 3600 | How long results stay cached; 0 turns the cache off |
 | `JOB_CONCURRENCY` | 1 | Truth-table jobs this process computes at once; 0 for an API-only instance, whose jobs a worker process (`npm run start:worker`) computes |
+| `TRUST_PROXY` | 0 | How many reverse proxies stand in front of the API (1 behind Caddy or nginx): the client's address is then read from `X-Forwarded-For`. Never more than the real number, or clients could forge their address |
+| `AUTH_RATE_LIMIT` | 0 (off) | Sign-ins and registrations one address may make in a minute, since each costs a password hash. Behind a proxy it needs `TRUST_PROXY` too |
 
 `start:api` and `start:worker` read `.env` if there is one; a variable set in the shell wins. With
 `DATABASE_URL` or `REDIS_URL` set, the API refuses to start if that server is unreachable (or the
@@ -175,7 +274,8 @@ AppModule
 ├── SimulationModule   /v1/circuits/{id}/...   SimulationController -> SimulationService -> SimulationPoolService, ResultCache
 ├── JobsModule         .../truth-table/jobs    TruthTableJobsService -> JobQueue (BullMQ, or in-process without Redis);
 │                                              workers: TruthTableJobProcessor -> SimulationPoolService, JobResults
-└── HealthModule       /health
+├── HealthModule       /health
+└── DocsModule         /docs, /openapi.json   Swagger UI on the contract; / leads there
 + ProblemFilter        every error leaves as application/problem+json, via the contract's toProblem()
 ```
 
@@ -235,7 +335,9 @@ shortcuts. In short:
 ## REST API
 
 The contract is [openapi.yaml](packages/api-contract/openapi.yaml), and the reasoning behind it is
-in [docs/api-design.md](docs/api-design.md). In short:
+in [docs/api-design.md](docs/api-design.md). The running API shows it at `/docs` (Swagger UI, where
+every endpoint can be tried) and serves it at `/openapi.json`. The page can't disagree with the
+server: it is the file the server is built from. In short:
 - **Endpoints:** `/v1/circuits` (CRUD), `/v1/circuits/{id}/simulate`,
   `/v1/circuits/{id}/truth-table`, `/v1/circuits/{id}/truth-table/jobs` (background jobs for big
   tables), `/v1/circuits/{id}/runs` (recent simulations and jobs), `/v1/circuits/{id}/shares`, and
@@ -289,6 +391,8 @@ development.
 - **Passwords:** 15 to 256 characters (NIST's rule), hashed with Argon2id.
 - **Sign-in throttling:** 5 failures for one account from one address mean 15 minutes of 429,
   counted in Redis, so every API instance shares the count.
+- **An address limit (optional):** `AUTH_RATE_LIMIT` caps the sign-ins and registrations one address may
+  make in a minute. Each costs a password hash, and a stream of them can keep a server's CPUs busy.
 - **Access tokens:** JWTs valid for 15 minutes, checked without touching the database.
 - **Refresh tokens:** work once each. A reused one ends its session, since someone else holds a
   copy.
@@ -296,7 +400,7 @@ development.
 
 ## Testing
 
-`npm test` runs 762 tests in about 25 seconds (Docker must be running, for Redis).
+`npm test` runs 782 tests in about 35 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.
@@ -306,7 +410,7 @@ development.
   - **Failures:** the database or Redis stopping under a running app, and coming back.
   - **Contract:** every response is checked against `openapi.yaml`.
   - **Access rules:** run as the table they are.
-- **Do the tests catch bugs?** 25 deliberately planted bugs were all caught.
+- **Do the tests catch bugs?** 31 deliberately planted bugs were all caught.
 - **Time:** rules that depend on time (token and session expiry, sign-in throttling, job results
   and allowances) are tested by moving an injected clock instead of waiting.
 - **Coverage:** 95% of statements.
@@ -330,101 +434,31 @@ development.
   consumer (BullMQ), and a compare-and-swap state machine for jobs; see
   [caching-and-jobs.md](docs/caching-and-jobs.md).
 
-## Engine API
+## Putting it online
 
-```ts
-import { SequentialCircuit, compileCircuit, simulate, truthTable, validateCircuit } from "@circuitlab/engine";
+[docs/deploy.md](docs/deploy.md) goes from an empty Linux machine to a running site: Caddy in front for
+HTTPS, the secrets Compose insists on, memory limits for Redis, and a limit on sign-ins and
+registrations per address (each costs a password hash, which [docs/system-design.md](docs/system-design.md)
+measured). In short, once `SITE_ADDRESS`, `JWT_SECRET` and `POSTGRES_PASSWORD` are in `.env`:
 
-validateCircuit(json);                         // ValidationIssue[] (every problem, not just the first)
-const compiled = compileCircuit(json);         // validate + sort once; throws CircuitValidationError / CycleError
-simulate(compiled, { A: 1, B: 0 });            // { outputs, signals, order }; throws SimulationInputError
-truthTable(compiled, { offset: 0, limit: 100 });  // one page of rows; truthTableRows() is the lazy version
-
-const latch = new SequentialCircuit(json);    // what simulationStrategy("sequential").prepare(json) makes
-const step1 = latch.run({ S: 1, R: 0 });                      // { mode, outputs, signals, state, evaluations }
-const step2 = latch.run({ S: 0, R: 0 }, step1.state);         // the state carries memory between steps
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-| Module | Contents |
-| --- | --- |
-| `types.ts` | `Bit`, `Gate` (discriminated union on `type`), `Wire`, `Circuit`, `GATE_TYPES` |
-| `gates.ts` | The gate registry: `GATE_DEFINITIONS` (inputs, behaviour, description per type), and `GATE_ARITY` derived from it |
-| `gate-factory.ts` | `createGateNode`: a gate as data becomes a runnable node |
-| `validate.ts` | `validateCircuit`, `assertValidCircuit`: checks untrusted input |
-| `topological-sort.ts` | `topologicalSort`: Kahn's algorithm, with the loop path on failure |
-| `compile.ts` | `compileCircuit` / `CompiledCircuit`: a reusable evaluation plan |
-| `simulate.ts` | `simulate` (combinational) |
-| `strategies.ts` | `simulationStrategy(mode)`: the combinational and sequential strategies |
-| `sequential.ts`, `components.ts` | Sequential simulation, and Tarjan's strongly connected components |
-| `truth-table.ts` | `truthTable`, `truthTableRows`, `inputsForRow` (row number to input values, up to 53 inputs) |
-| `errors.ts` | `CircuitLabError`, the base of `CircuitValidationError`, `CycleError`, `SimulationInputError`, `OscillationError`; `toJSON()` and `reviveError()` |
+The files were tested locally, through Caddy, with the real stack. A real domain name with a Let's
+Encrypt certificate wasn't: that needs a public machine, and renting one is for the owner of the
+project to do.
 
-Circuit format: gates have an `id`, a `type` and an optional `label`. A wire connects the output
-of gate `from` to input pin `toPin` of gate `to`. Pins are numbered from 0 and must be used without
-gaps. Simulation inputs and outputs are keyed by the ids of the INPUT and OUTPUT gates.
+## Using the packages as libraries
 
-| Gate type | Input pins |
-| --- | --- |
-| INPUT, CONST | 0 |
-| OUTPUT, BUF, NOT | 1 |
-| AND, OR, NAND, NOR, XOR, XNOR | 2 to 64 (a multi-input XOR computes odd parity) |
+The engine, the netlist reader and the worker-thread runner are packages of their own:
+- **`@circuitlab/engine`** validates circuits, sorts them, simulates them (combinationally, or step by
+  step for latches and flip-flops) and makes truth tables.
+- **`@circuitlab/netlist`** reads and writes circuits as text files, streaming.
+- **`@circuitlab/runner`** runs simulations on a pool of worker threads, with cancellation and limits.
 
-## Netlist files
-
-One gate per line, with inputs listed in pin order. See [examples/netlists](examples/netlists).
-
-```
-# Half adder                  <- "#" starts a comment
-.name "Half adder"            <- optional circuit name
-
-A = INPUT
-B = INPUT
-sum   = XOR(A, B)             <- a name can be used before the line that defines it
-carry = AND(A, B)
-S = OUTPUT(sum)  "Sum"        <- optional label: a JSON-style quoted string
-one = CONST(1)
-```
-
-- **Names:** letters, digits, `_ . $ [ ]`, not starting with `.`.
-- **Gate types:** case-insensitive. `BUFF` is also accepted (the ISCAS benchmark spelling).
-- **Text handling:** UTF-8, and a byte order mark or Windows line endings are fine.
-
-```ts
-import { importNetlist, importNetlistFile, parseNetlist, formatNetlist } from "@circuitlab/netlist";
-
-await importNetlistFile("adder.net.gz");          // streams from disk; ".gz" is decompressed on the fly
-await importNetlist(request, { source: "upload" }); // any byte stream, e.g. an HTTP upload
-parseNetlist(text);                               // text already in memory
-Readable.from(formatNetlist(circuit));            // writes a circuit back out, lazily
-```
-
-**Errors:**
-- **`NetlistError`** covers problems in the text. It lists every problem as `file:line:column [CODE] message`.
-- **Stream errors pass through unchanged**, for example `ENOENT` or a corrupt gzip file.
-- **Size limits:** `maxLineLength`, `maxGates` and `maxIssues` stop an oversized or garbage upload early.
-
-## Simulating on worker threads
-
-```ts
-import { SimulationPool } from "@circuitlab/runner";
-
-const pool = new SimulationPool();              // one worker per CPU, minus one
-await pool.simulate(circuitJson, { A: 1, B: 0 }, { signal: AbortSignal.timeout(5000) });
-for await (const page of pool.truthTablePages(circuitJson)) send(page.rows);
-await pool.close();                             // waits for running tasks; destroy() doesn't
-```
-
-| When... | The promise rejects with |
-| --- | --- |
-| the circuit or inputs are invalid | the engine's own error (`CycleError`, ...), rebuilt with its data |
-| the `signal` fires (timeout or cancel) | `signal.reason`; a running task's worker is stopped and replaced |
-| a task needs more than `maxWorkerMemoryMb` | `WorkerCrashedError`; only that worker dies, and it is replaced |
-| every worker is busy and `maxQueue` tasks are waiting | `PoolBusyError`, immediately |
-| the pool is closed | `PoolClosedError` |
-
-**Main-thread cost:** results have to be turned back into objects on the main thread, which blocks it.
-- **Truth tables travel packed:** the rows are sent as a byte buffer that is handed over, not copied.
-- **Page big tables:** use `truthTablePages`, which fetches 1024-row pages in parallel and lets the event loop run between them.
+[docs/libraries.md](docs/libraries.md) has their reference: every function, the error types, the netlist
+format, and what the worker pool does when it is busy.
 
 ## Roadmap
 
@@ -442,7 +476,7 @@ await pool.close();                             // waits for running tasks; dest
 | 10 | Redis and queues | Cached results; large truth tables as BullMQ jobs | Done |
 | 11 | Docker | `docker-compose up` starts the API, Postgres, and Redis | Done |
 | 12 | System design | Design document for scaling to thousands of users | Done |
-| 13 | Polish | README, architecture diagram, Swagger, deployed demo | |
+| 13 | Polish | README, architecture diagram, Swagger, deployed demo | Done, except hosting the demo (see [docs/deploy.md](docs/deploy.md)) |
 
 ## Tooling notes
 
@@ -466,3 +500,6 @@ await pool.close();                             // waits for running tasks; dest
   create the queues and workers themselves, which keeps the choice between BullMQ and the in-process
   queue in one place (`JobsModule`). Redis 8's default memory policy, `noeviction`, is the one
   BullMQ needs.
+- **Swagger UI is `swagger-ui-dist`,** served by the API itself, so the documentation page needs nothing
+  from the internet. It depends on `@scarf/scarf`, which reports anonymous install statistics (platform,
+  Node version) when installed; the root `package.json` opts out with `scarfSettings`.

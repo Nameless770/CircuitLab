@@ -42,6 +42,7 @@ export {
   invalidToken,
   normalizeEmail,
   normalizePassword,
+  tooManyAuthRequests,
   tooManySignInAttempts,
   unauthenticated,
 } from "./auth";

@@ -1,10 +1,10 @@
-# CircuitLab testing (phase 8, extended in phases 9 and 10)
+# CircuitLab testing (phase 8, extended in phases 9, 10 and 13)
 
 ```bash
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 762 of them in about 25 seconds. The
+That builds everything, type-checks the tests, and runs all 782 of them in about 35 seconds. The
 API's integration tests run twice: once with everything in memory, and once as production runs,
 on a real PostgreSQL 18 and a real Redis 8.
 
@@ -106,6 +106,16 @@ test file ([containers.ts](../apps/api/test/support/containers.ts)):
   separate Redis for the cache; Redis stopped under a running app (simulating carries on uncached,
   sign-in and new jobs answer 503, and everything recovers without a restart); Redis frozen (503
   after two seconds rather than a hung request).
+- **Documentation and going online** (the "server" tests in [suites/all.ts](../apps/api/test/suites/all.ts), and
+  [auth-limits.test.ts](../apps/api/test/auth-limits.test.ts)):
+  - `/openapi.json` names the server it is on, and lists every operation; `/docs` serves the page and only
+    the Swagger UI files it uses (nothing else in that package's folder, whatever the path tries); `/` leads
+    there; none of it needs a token, not even a bad one.
+  - `TRUST_PROXY`: the throttle counts by the address a proxy reports, and a made-up address further left
+    in `X-Forwarded-For` isn't believed; with no proxy trusted, the header is ignored.
+  - The address limit (`AUTH_RATE_LIMIT`), on memory and on PostgreSQL with Redis: 429 with `Retry-After`
+    after the limit, sign-ins and registrations counted together, a count for each address, a new count
+    each minute (by moving the clock), and refreshing a token or any other request not limited.
 
 ## Do the tests catch bugs?
 
@@ -150,6 +160,17 @@ all were caught:
 | The Redis throttle reads the real time, not the injected clock | the throttle's time test, on Redis |
 | A result is still served after its 24 hours | `keeps a job's result for 24 hours, then answers 410` |
 | The in-memory cache evicts the oldest entry, not the least recently used | the cache's unit test |
+
+Phase 13 planted six more, in the built code, and all were caught:
+
+| Planted bug | Caught by |
+| --- | --- |
+| The address limit lets one attempt too few through (`>=` for `>`) | `answers 429, with Retry-After, once an address has signed in 5 times` |
+| Registrations aren't counted | `counts registrations too: they cost the same hash` |
+| The proxy's header is believed from the far end (`trust proxy: true`) | `believes only the proxy's own hop` |
+| The header is never believed (`trust proxy` never set) | eleven tests of the limit and the throttle by address |
+| A new minute doesn't start a new count | `starts a new count with each minute` |
+| Any file in Swagger UI's folder can be downloaded | `serves the documentation page, and only the Swagger UI files that it uses` |
 
 This is mutation testing by hand; a tool such as Stryker automates it.
 

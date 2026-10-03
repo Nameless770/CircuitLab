@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Digital logic circuit simulator",
+  "scarfSettings": {
+    "enabled": false
+  },
   "workspaces": [
     "packages/*",
     "apps/*",

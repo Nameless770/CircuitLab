@@ -64,7 +64,8 @@ cache, over HTTP.
 (`maxmemory-policy allkeys-lru`). A job queue must never lose a key (`noeviction`, which BullMQ
 requires), and one Redis has one policy. So `REDIS_CACHE_URL` may name a separate Redis for the
 cache. Without it, one Redis with `noeviction` (Redis 8's default) serves both. Every cache entry
-expires, and when that Redis is full, cache writes fail, which counts as a miss.
+expires, and when that Redis is full, cache writes fail, which counts as a miss. Phase 13's
+[docker-compose.prod.yml](../docker-compose.prod.yml) does it: two Redis servers, each with a memory limit.
 
 ## Background truth-table jobs
 

@@ -1,0 +1,90 @@
+# CircuitLab on a server. Laid over docker-compose.yml, this file:
+#   - adds Caddy, the only thing reachable from the internet: HTTPS in front of the API;
+#   - refuses to start without real secrets (JWT_SECRET, POSTGRES_PASSWORD) and a SITE_ADDRESS;
+#   - tells the API it is behind one proxy (TRUST_PROXY) and limits sign-ins and registrations per
+#     address (AUTH_RATE_LIMIT): docs/system-design.md measured why;
+#   - gives Redis a memory limit, and the result cache a Redis of its own that may forget old
+#     entries, apart from the one that holds the job queue and must never lose a key.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# docs/deploy.md has the steps, from an empty machine to a running site. Settings come from a .env
+# file next to this one (see .env.example).
+
+services:
+  # HTTPS in front of the API. For a real domain name it gets a certificate from Let's Encrypt, and
+  # renews it. Port 80 must be open too: that is where Let's Encrypt checks you own the name.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS in .env to your domain name, such as demo.example.com (see docs/deploy.md)}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificates. Keeping them across restarts matters: Let's Encrypt limits how many a
+      # name may get.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env, letters and digits only (see .env.example)}
+
+  # The job queue, the sign-in throttle and job results. It must never lose a key, so it never
+  # evicts (noeviction); and it has a size limit, so that it can't fill the machine.
+  redis:
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+
+  # The result cache, in a Redis of its own. When it is full it forgets the oldest entries
+  # (allkeys-lru), which is right for a cache and wrong for the queue. Nothing in it is kept on disk.
+  redis-cache:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  migrate:
+    environment:
+      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/circuitlab
+
+  api:
+    # Only Caddy is published. The API itself isn't reachable from outside the Compose network.
+    ports: !reset []
+    environment:
+      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/circuitlab
+      # Without a key of its own the API makes a random one at every start: everyone is signed out
+      # at each restart, and a second copy of the API would reject the first one's tokens.
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env to at least 32 random characters (see .env.example)}
+      REDIS_CACHE_URL: redis://redis-cache:6379
+      # One proxy (Caddy) stands in front: believe its X-Forwarded-For, so that the throttle and the
+      # address limit see each client's own address and not Caddy's.
+      TRUST_PROXY: "1"
+      # Sign-ins and registrations one address may make in a minute (each costs a password hash).
+      # Behind a shared address, such as a school's, raise it (see docs/deploy.md).
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-30}
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+
+  worker:
+    environment:
+      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/circuitlab
+      REDIS_CACHE_URL: redis://redis-cache:6379
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
+  caddy-config:

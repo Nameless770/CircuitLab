@@ -135,12 +135,28 @@ The in-memory storage follows the same rules, and the same integration tests run
 - **Expired sessions are deleted on a schedule:** housekeeping runs `delete_expired_sessions` every
   10 minutes (a BullMQ job scheduler; a timer without Redis).
 
+## Done in phase 13
+
+- **`TRUST_PROXY`,** so that behind a reverse proxy the throttle sees the client's address and not the
+  proxy's (Express's `trust proxy`: 1 behind Caddy). It is off by default, because with no proxy the
+  header is the client's to forge. Tested by playing the proxy: the address it reports is the one
+  counted, and a made-up address further left in the header isn't believed.
+- **An optional limit per address on sign-ins and registrations,** `AUTH_RATE_LIMIT` a minute (off by
+  default; 30 in `docker-compose.prod.yml`). Both cost a full Argon2 hash, and the throttle above counts
+  failures per account and address, so a client making up email addresses was never stopped by it, and
+  registration had no throttle at all. [Measured in phase 12](system-design.md#a-login-storm): a stream
+  of them took a container's CPUs and cut its other traffic by 95%. Like the throttle, the count is in
+  Redis (shared by every API instance) or in memory, the window follows the injected clock, and it
+  fails closed.
+  - **Behind a shared address** (a school), many people look like one. Raise the limit:
+    [deploy.md](deploy.md#what-the-setup-does-and-why) has the arithmetic.
+  - **It counts addresses, not networks:** an IPv6 client can change address within its own block.
+
 ## Not done yet
 
 | What | When |
 | --- | --- |
 | Email verification, password reset, changing a password, "sign out everywhere" | Not on the roadmap yet; the `sessions` table already supports the last |
-| `trust proxy`, so the throttle sees the client's address rather than the reverse proxy's | Phase 13, when the deployed API gets a reverse proxy. Phase 11's Docker setup has none: its port forwarding passes on no client address (see [docker.md](docker.md#known-shortcuts)) |
-| A limit per address on sign-in and registration. The throttle is per account *and* address, so one address can make the server hash without limit (every new email gets 5 free failures), and registration isn't throttled at all: [measured](system-design.md#a-login-storm) to cut a container's other traffic by 95% | Designed in phase 12 ([system-design.md](system-design.md#stage-1-fix-the-sharp-edges)): at the reverse proxy, or as a Redis counter |
+| Counting the address limit by network (an IPv6 /64) instead of by address | If anyone ever attacks it that way |
 | A grace period for two browser tabs refreshing the same token at the same moment (today the second one ends the session) | If it bothers users |
 | A list of common passwords to refuse, as NIST also asks | With the account settings above |

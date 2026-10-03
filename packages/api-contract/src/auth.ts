@@ -53,6 +53,17 @@ export function tooManySignInAttempts(retryAfterSeconds: number): ApiError {
 }
 
 /**
+ * 429 after too many sign-ins and registrations from one address within a minute (the optional
+ * address limit, AUTH_RATE_LIMIT): both cost a full password hash.
+ */
+export function tooManyAuthRequests(retryAfterSeconds: number): ApiError {
+  const seconds = Math.max(1, Math.ceil(retryAfterSeconds));
+  return new ApiError("too-many-requests", `Too many sign-in and registration attempts from this address. Try again in ${seconds} seconds.`, {
+    headers: { "Retry-After": String(seconds) },
+  });
+}
+
+/**
  * The token in an `Authorization: Bearer <token>` header.
  * @throws ApiError `invalid-token` (401) for any other scheme or shape
  */

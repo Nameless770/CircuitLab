@@ -6,6 +6,7 @@ import type { Clock } from "./common/clock";
 import { ProblemFilter } from "./common/problem.filter";
 import { AppConfig } from "./config/app-config";
 import { ConfigModule } from "./config/config.module";
+import { DocsModule } from "./docs/docs.controller";
 import { HealthModule } from "./health/health.controller";
 import { JobsModule } from "./jobs/jobs.module";
 import { RedisModule } from "./redis/redis.module";
@@ -24,6 +25,7 @@ import { StorageModule } from "./storage/storage.module";
  *   JobsModule        .../truth-table/jobs  TruthTableJobsService -> JobQueue (BullMQ or in-process);
  *                                           workers: TruthTableJobProcessor -> SimulationPoolService, JobResults
  *   HealthModule      /health               -> SimulationPoolService, PrismaService, RedisService
+ *   DocsModule        /docs, /openapi.json  Swagger UI on the contract; / leads there
  *
  * plus ProblemFilter, through which every error leaves the API.
  */
@@ -41,6 +43,7 @@ export class AppModule {
         SimulationModule,
         JobsModule.forRoot(config, "api"),
         HealthModule,
+        DocsModule,
       ],
       providers: [{ provide: APP_FILTER, useClass: ProblemFilter }],
     };

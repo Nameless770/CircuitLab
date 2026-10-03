@@ -310,12 +310,18 @@ later.
 
 | Change | Why | Size |
 | --- | --- | --- |
-| **Limit anonymous hashing:** a per-address limit on `/v1/auth/login` and `/v1/auth/register`, at the reverse proxy (nginx `limit_req`, Caddy) or as a Redis counter in the API, like the sign-in throttle | One address can burn a container's CPUs: the storm, and the unthrottled registration | S to M |
+| **Limit anonymous hashing:** a per-address limit on `/v1/auth/login` and `/v1/auth/register`, at the reverse proxy (nginx `limit_req`; Caddy has none built in) or as a Redis counter in the API, like the sign-in throttle. It has to let a whole class sign in at once from one shared address, so it can't be tight | One address can burn a container's CPUs: the storm, and the unthrottled registration | S to M |
 | **Give Redis a memory limit and split it in two:** one for the cache, evicting old entries (`allkeys-lru`), through the existing `REDIS_CACHE_URL` (tested in phase 10); one for the queue, throttle and results, which never evicts (`noeviction`). Both with `maxmemory` | A cached result is up to 98 KB, with no limit today | S (configuration, a second container) |
 | **A wait limit on the database pool** (`connectionTimeoutMillis`, say 5 s), mapped to the existing 503 | Otherwise a request waits for a connection forever. Checking that the timeout error really becomes a 503 is part of the change | S |
 | **Answer `If-None-Match` in `GET /v1/circuits/{id}` from the access row,** before loading gates and wires, as truth-table pages do | Loading a 5,000-gate circuit costs 37 ms of the API's CPU | S |
 | **Retention for the history:** housekeeping deletes runs older than, say, 30 days, in batches (the scheduler exists) | 31 GB a month at the target's pace; deleting is cheap now and painful later | S to M |
 | **Decide what a missing `JWT_SECRET` means:** refuse to start in production, or keep warning | Scaling out without it breaks sign-in, but refusing breaks phase 11's "one command, no setup". Probably refuse, and make `docker compose up` generate one | S (a decision first) |
+
+**Phase 13 did** the first, the second and the last of these for the demo, and tested them: the address
+limit (`AUTH_RATE_LIMIT`, in the API, along with `TRUST_PROXY`), the memory limits and the second Redis
+(in `docker-compose.prod.yml`), and a `JWT_SECRET` that the production file requires. **Still open:** the
+wait limit on the database pool, answering `If-None-Match` before loading a circuit, and the history's
+retention. See [section 9](#9-what-phase-13-did-with-this).
 
 **What stage 1 doesn't fix:** the API's own CPU, or anything about the database.
 
@@ -454,11 +460,20 @@ has nothing to decide on.
 - **Caching more.** The cache covers the one request that is expensive and repeated; a hit saves
   the gates and wires, which is as much as a cache can.
 
-## 9. For phase 13
+## 9. What phase 13 did with this
 
 A deployed demo is stages 1 and 2 in miniature: one small machine running phase 11's Compose stack
-behind a reverse proxy. It needs the cheap parts of them: the proxy (TLS, `trust proxy`, a limit on
-`/v1/auth/*`), `JWT_SECRET` and `POSTGRES_PASSWORD` set, and Redis with `maxmemory`.
+behind a reverse proxy ([deploy.md](deploy.md)). Phase 13 took the cheap parts of those stages:
+
+- **Done, and tested locally through Caddy:** the limit on sign-ins and registrations per address
+  (`AUTH_RATE_LIMIT`), `TRUST_PROXY` (a forged `X-Forwarded-For` doesn't dodge the limit), a memory limit
+  on Redis with the cache in a Redis of its own, and `JWT_SECRET`, `POSTGRES_PASSWORD` and `SITE_ADDRESS`
+  required by `docker-compose.prod.yml`.
+- **Not done, and still stage 1:** the wait limit on the database pool, answering `If-None-Match` before
+  loading a circuit, and retention for the history. None of them blocks a demo; all of them still apply
+  to a bigger site.
+- **Not done, stage 2 and later:** several API copies, a separate pool for `/v1/auth/*`, a readiness check
+  apart from liveness, and everything in stages 3 and 4.
 
 ## Known shortcuts
 

@@ -43,6 +43,22 @@ export interface AppSettings {
    * makes an API-only instance, leaving the jobs to workers (`npm run start:worker`).
    */
   readonly jobConcurrency: number;
+  /**
+   * How many reverse proxies stand between the internet and the API, for Express's "trust proxy"
+   * setting. `TRUST_PROXY`, default 0. Behind one proxy (Caddy, nginx, a platform's load balancer)
+   * it is 1: the client's address, which the sign-in throttle and the address limit count by, is
+   * then read from the proxy's X-Forwarded-For header instead of being the proxy's own. Never more
+   * than the real number: a client could then make up its address.
+   */
+  readonly trustProxy: number;
+  /**
+   * Most sign-ins and registrations one address may make in a minute; 0 turns the limit off.
+   * `AUTH_RATE_LIMIT`, default 0. Both cost a full password hash, and the sign-in throttle only
+   * counts failures per account, so without this a client making up email addresses can keep the
+   * API's CPUs busy hashing (measured in docs/system-design.md). Only meaningful with the right
+   * TRUST_PROXY behind a proxy: otherwise every client counts as the proxy's one address.
+   */
+  readonly authRateLimit: number;
 }
 
 /**
@@ -64,6 +80,8 @@ export class AppConfig implements AppSettings {
   readonly redisPrefix: string;
   readonly cacheTtlSeconds: number;
   readonly jobConcurrency: number;
+  readonly trustProxy: number;
+  readonly authRateLimit: number;
 
   constructor(settings: Partial<AppSettings> = {}) {
     this.port = settings.port ?? 3000;
@@ -79,6 +97,8 @@ export class AppConfig implements AppSettings {
     this.redisPrefix = settings.redisPrefix ?? "circuitlab";
     this.cacheTtlSeconds = settings.cacheTtlSeconds ?? 3600;
     this.jobConcurrency = settings.jobConcurrency ?? 1;
+    this.trustProxy = settings.trustProxy ?? 0;
+    this.authRateLimit = settings.authRateLimit ?? 0;
   }
 
   /** Reads the settings from environment variables, reporting every invalid one at once. */
@@ -133,6 +153,8 @@ export class AppConfig implements AppSettings {
       redisPrefix: prefix("REDIS_PREFIX"),
       cacheTtlSeconds: whole("CACHE_TTL_SECONDS", 0),
       jobConcurrency: whole("JOB_CONCURRENCY", 0),
+      trustProxy: whole("TRUST_PROXY", 0),
+      authRateLimit: whole("AUTH_RATE_LIMIT", 0),
     });
     if (config.jobConcurrency === 0 && config.redisUrl === undefined) {
       problems.push("JOB_CONCURRENCY=0 needs REDIS_URL: without Redis, jobs can only run in this process");

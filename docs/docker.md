@@ -10,6 +10,8 @@ The API then answers on http://localhost:3000 (try http://localhost:3000/health)
 app's online mode uses it as it is. Ctrl+C stops everything. The data stays in two Docker
 volumes, so the next `docker compose up` finds your accounts and circuits again.
 
+To put it online behind HTTPS (phase 13), see [deploy.md](deploy.md): it lays a second file over this one.
+
 | Command | What it does |
 | --- | --- |
 | `docker compose up --build` | Builds the image if the code changed, and starts everything (Ctrl+C stops it) |
@@ -146,8 +148,8 @@ On Docker Desktop 4.88 (engine 29.7), over HTTP, as any client would:
 
 | Shortcut | Why it's acceptable for now | The proper fix |
 | --- | --- | --- |
-| The image is about 870 MB, about 150 MB of it Prisma's CLI and Studio, kept for migrations | One image is simpler, and disk space on a laptop is cheap | A separate small image for `migrate` |
-| Every client looks like Docker's own network address to the API, so the sign-in throttle counts all clients as one | On your own computer you *are* the only client | When deploying (phase 13): a reverse proxy in front that passes on the client's address, and Express's `trust proxy` setting for it |
+| The image is about 885 MB: about 150 MB of it Prisma's CLI and Studio, kept for migrations, and 16 MB Swagger UI (phase 13) | One image is simpler, and disk space on a laptop is cheap | A separate small image for `migrate` |
+| Every client looks like Docker's own network address to the API, so the sign-in throttle counts all clients as one | On your own computer you *are* the only client | Done for going online (phase 13): [docker-compose.prod.yml](../docker-compose.prod.yml) puts Caddy in front and sets `TRUST_PROXY=1` ([deploy.md](deploy.md)) |
 | Without `JWT_SECRET` in `.env`, restarting the API signs everyone out, and a second API copy would answer 401 to the first one's tokens ([measured](system-design.md#are-the-copies-interchangeable)) | One command still starts everything, with no setup | Set it in `.env` (generate one as `.env.example` shows) |
 | Code changes need `docker compose up --build` | Rebuilding takes seconds once the dependencies are cached | Fine as it is; day-to-day development uses `npm run start:api` |
 | npm warns that the install scripts of `argon2`, `prisma` and two others aren't approved yet | They still run: Prisma's engine is in the image. The warning is about a future npm default | Approve them (`npm install-scripts approve`) when that npm version arrives |

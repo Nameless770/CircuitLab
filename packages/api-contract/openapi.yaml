@@ -583,7 +583,9 @@ paths:
       operationId: register
       tags: [Accounts]
       summary: Create an account
-      description: Creates the account and signs it in, like `/auth/login`.
+      description: |
+        Creates the account and signs it in, like `/auth/login`. Where the server limits sign-ins and
+        registrations per address (it is optional: `AUTH_RATE_LIMIT`), too many in a minute get 429.
       security: []
       requestBody:
         required: true
@@ -606,6 +608,7 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "415": { $ref: "#/components/responses/UnsupportedMediaType" }
         "422": { $ref: "#/components/responses/InvalidFields" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
 
   /auth/login:
@@ -616,6 +619,8 @@ paths:
       description: |
         Starts a session: an access token for requests, and a refresh token to get new ones. After 5
         failed attempts for one account from one address, further attempts get 429 for 15 minutes.
+        Where the server also limits sign-ins and registrations per address, too many in a minute get
+        429 as well.
       security: []
       requestBody:
         required: true
@@ -931,7 +936,8 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     TooManyRequests:
       description: |
-        Too many failed sign-ins, or too many truth-table jobs (`too-many-requests`); see
+        Too many failed sign-ins, too many sign-ins or registrations from one address in a minute (where
+        the server limits them), or too many truth-table jobs (`too-many-requests`); see
         `Retry-After`.
       headers:
         Retry-After: { $ref: "#/components/headers/RetryAfter" }

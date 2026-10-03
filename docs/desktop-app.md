@@ -102,7 +102,8 @@ process can read the Settings, so now it does the job alone, in both.
 Settings screen checks it before saving: it must be an `http://` or `https://` address
 (`normalizeApiUrl` in [helpers.ts](../apps/desktop/electron/helpers.ts)). Accounts belong to a
 server, so changing the server signs you out (it asks first). `CIRCUITLAB_API_URL`, when set,
-overrides the saved address for one run; development and tests use that.
+overrides the saved address for one run; development and tests use that. A server put online as in
+[deploy.md](deploy.md) works the same way: type its `https://` address.
 
 ### 6. Signing in
 

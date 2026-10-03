@@ -3,6 +3,7 @@ import type { AuthSession, UserResource } from "@circuitlab/api-contract";
 import { Controller, Get, HttpCode, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { header } from "../common/http";
+import { AuthRateLimit } from "./auth-rate-limit";
 import { CurrentUser, type AuthUser } from "./auth-user";
 import { AuthService } from "./auth.service";
 import { IgnoresAccessToken } from "./authentication.guard";
@@ -11,24 +12,31 @@ import { IgnoresAccessToken } from "./authentication.guard";
 @Controller({ path: "auth", version: "1" })
 @IgnoresAccessToken()
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly rateLimit: AuthRateLimit,
+  ) {}
 
   @Post("register")
   @HttpCode(201)
-  register(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<AuthSession> {
+  async register(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<AuthSession> {
     requestMediaType("register", header(request.headers["content-type"]));
     noStore(response);
+    // Registering costs a password hash, like signing in: counted per address when the limit is on.
+    await this.rateLimit.hit(request.ip ?? "");
     return this.auth.register(parseRegisterRequest(request.body));
   }
 
   @Post("login")
   @HttpCode(200)
-  login(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<AuthSession> {
+  async login(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<AuthSession> {
     requestMediaType("login", header(request.headers["content-type"]));
     noStore(response);
-    // The socket's address. Behind a reverse proxy (phase 11) it is the proxy's, and Express's
-    // "trust proxy" setting must be configured for request.ip to be the client's.
-    return this.auth.login(parseSignInRequest(request.body), request.ip ?? "");
+    // The socket's address. Behind a reverse proxy it is the proxy's, unless the TRUST_PROXY setting
+    // (Express's "trust proxy") says how many proxies to believe: then it is the client's.
+    const address = request.ip ?? "";
+    await this.rateLimit.hit(address);
+    return this.auth.login(parseSignInRequest(request.body), address);
   }
 
   @Post("refresh")

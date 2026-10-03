@@ -50,6 +50,10 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NestExp
 
   const express = app.getHttpAdapter().getInstance();
   express.disable("x-powered-by"); // don't advertise the framework
+  // Behind reverse proxies, believe their X-Forwarded-For for that many hops, so request.ip is the
+  // client's (which the throttle and the address limit count by), not the proxy's. Off by default:
+  // with no proxy, the header would be the client's to forge.
+  if (config.trustProxy > 0) express.set("trust proxy", config.trustProxy);
   express.set("etag", false); // ETags are the API's own: they name circuit versions (docs/api-design.md)
   return app;
 }

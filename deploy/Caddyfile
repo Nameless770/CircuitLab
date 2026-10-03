@@ -1,0 +1,22 @@
+# The reverse proxy in front of the API (see docker-compose.prod.yml and docs/deploy.md).
+#
+# SITE_ADDRESS, from .env, decides how the site is served:
+#   demo.example.com   HTTPS, with a certificate Caddy gets and renews by itself. The name must point
+#                      at this machine, and ports 80 and 443 must be open to the internet.
+#   localhost          HTTPS with Caddy's own test certificate: for trying this out on a computer.
+#   http://localhost   plain HTTP, on port 80 inside the container.
+{$SITE_ADDRESS} {
+	# Smaller answers: the Swagger UI script, JSON, CSV.
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	# Everything goes to the API. Caddy puts the client's address in X-Forwarded-For (replacing any
+	# the client sent, since no proxy is trusted in front of Caddy), and the API, with TRUST_PROXY=1,
+	# believes exactly that one hop.
+	reverse_proxy api:3000
+}

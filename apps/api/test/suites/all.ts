@@ -29,6 +29,45 @@ export function describeApi(setup: Setup): void {
       const reply = await context().api.get("/v1/nope");
       expect([reply.status, reply.body.code]).toEqual([404, "not-found"]);
     });
+
+    it("serves its contract at /openapi.json, naming itself as the server", async () => {
+      const reply = await context().api.get("/openapi.json");
+      expect(reply.status).toBe(200);
+      expect(reply.headers.get("content-type")).toMatch(/^application\/json/);
+      expect(reply.body).toMatchObject({ openapi: "3.1.0", info: { title: "CircuitLab API" }, servers: [{ url: "/v1" }] });
+      const served = Object.values<any>(reply.body.paths).flatMap((item) => Object.values<any>(item).map((operation) => operation?.operationId));
+      expect(allOperations().map((operation) => operation.id).filter((id) => !served.includes(id))).toEqual([]);
+    });
+
+    it("serves the documentation page, and only the Swagger UI files that it uses", async () => {
+      const { api } = context();
+      const page = await api.get("/docs");
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toMatch(/^text\/html/);
+      expect(page.text).toContain("/docs/assets/swagger-ui-bundle.js");
+      const init = await api.get("/docs/init.js");
+      expect(init.status).toBe(200);
+      expect(init.headers.get("content-type")).toMatch(/javascript/);
+      expect(init.text).toContain("/openapi.json");
+      const bundle = await api.get("/docs/assets/swagger-ui-bundle.js");
+      expect(bundle.status).toBe(200);
+      expect(bundle.headers.get("content-type")).toMatch(/javascript/);
+      expect(bundle.text.length).toBeGreaterThan(500_000);
+      expect((await api.get("/docs/assets/swagger-ui.css")).status).toBe(200);
+      // Nothing else in the package's folder is reachable, whatever the path tries.
+      for (const other of ["package.json", "index.js", "swagger-ui-bundle.js.map", "..%2Fpackage.json", "%2e%2e%2fpackage.json"]) {
+        expect((await api.get(`/docs/assets/${other}`)).status, other).toBe(404);
+      }
+    });
+
+    it("leads from the root to the documentation, and none of it needs a token, even a bad one", async () => {
+      const { api } = context();
+      const root = await fetch(`${api.base}/`, { redirect: "manual" });
+      expect([root.status, root.headers.get("location")]).toEqual([302, "/docs"]);
+      const badToken = { Authorization: "Bearer not-a-token" };
+      expect((await api.get("/docs", { headers: badToken })).status).toBe(200);
+      expect((await api.get("/openapi.json", { headers: badToken })).status).toBe(200);
+    });
   });
 
   accountsSuite(context);

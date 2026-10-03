@@ -132,6 +132,15 @@ describe("configuration", () => {
     }
     expect(AppConfig.fromEnvironment({ PORT: "8080", DATABASE_POOL_SIZE: "1" })).toMatchObject({ port: 8080, databasePoolSize: 1, databaseUrl: undefined });
   });
+
+  it("trusts no proxy and limits no address unless told to, and reads both settings as whole numbers", () => {
+    expect(AppConfig.fromEnvironment({})).toMatchObject({ trustProxy: 0, authRateLimit: 0 });
+    expect(new AppConfig()).toMatchObject({ trustProxy: 0, authRateLimit: 0 });
+    expect(AppConfig.fromEnvironment({ TRUST_PROXY: "1", AUTH_RATE_LIMIT: "30" })).toMatchObject({ trustProxy: 1, authRateLimit: 30 });
+    expect(() => AppConfig.fromEnvironment({ TRUST_PROXY: "-1", AUTH_RATE_LIMIT: "many" })).toThrow(
+      /TRUST_PROXY must be a whole number of at least 0[\s\S]*AUTH_RATE_LIMIT must be a whole number of at least 0/,
+    );
+  });
 });
 
 describe("database errors", () => {

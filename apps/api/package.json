@@ -35,7 +35,8 @@
     "ioredis": "^6.0.0",
     "jose": "^6.2.12",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "swagger-ui-dist": "^5.33.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
