@@ -1,0 +1,10 @@
+# Line endings: text files are LF in the repository and in every working copy, on every platform.
+#
+# Git for Windows checks files out with CRLF unless told otherwise (core.autocrlf), and CRLF breaks
+# whatever expects LF: a shell script or a Caddyfile mounted into a Linux container, or a test that
+# adds its own "\r\n" to a fixture to try Windows line endings (a fresh clone on Windows hit that
+# one). With this file, a clone looks the same everywhere.
+* text=auto eol=lf
+
+# Never text, whatever their bytes look like.
+*.png binary

@@ -70,9 +70,10 @@ describe("reading netlists", () => {
   });
 
   it("accepts Windows line endings and a byte-order mark", async () => {
-    const windows = `﻿${text("full-adder.net").replaceAll("\n", "\r\n")}`;
-    expect(parseNetlist(windows)).toEqual(parseNetlist(text("full-adder.net")));
-    expect(await importNetlist(Readable.from([Buffer.from(windows)]))).toEqual(parseNetlist(text("full-adder.net")));
+    const lf = text("full-adder.net").replaceAll("\r\n", "\n"); // whatever Git checked the file out as
+    const windows = `\uFEFF${lf.replaceAll("\n", "\r\n")}`; // CRLF line endings, after a byte-order mark
+    expect(parseNetlist(windows)).toEqual(parseNetlist(lf));
+    expect(await importNetlist(Readable.from([Buffer.from(windows)]))).toEqual(parseNetlist(lf));
   });
 
   it("decompresses gzip on the fly", async () => {

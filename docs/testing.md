@@ -223,14 +223,49 @@ Phase 10 added:
 They run on both setups, so the Redis throttle and the job results answer to the injected clock
 too; see [design-patterns.md](design-patterns.md).
 
+## Continuous integration
+
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) runs on every push to `main` and on every pull
+request, on fresh Ubuntu machines from GitHub. The badge at the top of the README shows the last result on
+`main`.
+
+| Job | What it runs |
+| --- | --- |
+| Tests | `npm ci` (the versions in the lockfile), `npm test`, `npm run db:check`, `npm run lint:api` |
+| Docker image and Compose files | `docker build`; `docker compose config` for the development setup and the production one; then the image is started with no database and asked for `/health`, `/docs` and `/openapi.json` |
+
+- **Docker is already on those machines,** so the tests start the same Redis and PostgreSQL containers as
+  on a laptop.
+- **Electron isn't downloaded** (`ELECTRON_SKIP_BINARY_DOWNLOAD`): the desktop app's unit tests never start
+  it.
+- **A newer commit cancels** the older run on its branch, and the workflow can only read the repository.
+- **Not run there:** the desktop smoke test (it drives the real window: `npm run smoke:desktop`), the load
+  scripts (`scripts/load`), and a real deployment.
+
+**Checked on Linux before it existed.** The project is developed on Windows, and its tests had only ever
+run there. So the `tests` job was simulated: a Linux container with Node 24, 4 CPUs and access to Docker,
+running the same commands on the project's files. All 782 tests, the migrations check and the lint passed,
+in about two and a half minutes (`npm ci` 70 seconds, `npm test` 54, `db:check` 18). The workflow file
+itself was checked with `actionlint`, which also runs `shellcheck` on its scripts.
+
+**What the simulation found: line endings.** Its first run used files with Windows line endings (CRLF),
+which is what a fresh `git clone` on Windows gives, because Git for Windows converts by default. One test
+failed: "accepts Windows line endings and a byte-order mark" added its own `\r` to a fixture that already
+had one. The repository stores LF, and so did the working copy of the machine it was written on, so it had
+never happened there; anyone cloning on Windows would have seen it. Two fixes: the test first brings the
+fixture to LF, so that it no longer depends on how the file was checked out; and
+[.gitattributes](../.gitattributes) pins LF for text files in every checkout (`* text=auto eol=lf`), which
+also keeps shell scripts and the Caddyfile working when they are mounted into Linux containers.
+
 ## Not covered
 
 - **Load and performance:** measured by hand in phase 12, not by `npm test`: load numbers depend on
   the machine, so a test with a threshold would fail on a slow day. The scripts are in `scripts/load`,
   and the results in [system-design.md](system-design.md).
-- **A browser front end:** phase 13, if there is one.
-- **Continuous integration:** a workflow running `npm test` (with Docker) and `npm run db:check`
-  on every push fits phase 11, next to Docker.
+- **A browser front end:** there isn't one. The front end is the desktop app, covered by its unit tests and
+  its smoke test.
+- **A Windows run in CI:** the tests run on Linux there, and on Windows by whoever develops. The line-ending
+  fix above is what keeps the two alike.
 - **The housekeeping schedule itself:** the tests run housekeeping directly, and check that the
   BullMQ schedule exists; they don't wait 10 minutes for it.
 - **An upstream warning:** Prisma's PostgreSQL adapter triggers a `pg` deprecation warning

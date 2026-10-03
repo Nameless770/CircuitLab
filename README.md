@@ -1,5 +1,7 @@
 # CircuitLab
 
+[![CI](https://github.com/Nameless770/CircuitLab/actions/workflows/ci.yml/badge.svg)](https://github.com/Nameless770/CircuitLab/actions/workflows/ci.yml)
+
 Build digital logic circuits, flip their inputs, and watch the signals flow.
 
 CircuitLab is a circuit simulator in three parts: a **desktop app** for drawing and testing circuits
@@ -414,6 +416,9 @@ development.
 - **Time:** rules that depend on time (token and session expiry, sign-in throttling, job results
   and allowances) are tested by moving an injected clock instead of waiting.
 - **Coverage:** 95% of statements.
+- **Continuous integration:** GitHub Actions runs the tests, the migrations check, the contract lint and a
+  Docker build on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)); the
+  badge at the top shows the result.
 
 ## Design patterns
 

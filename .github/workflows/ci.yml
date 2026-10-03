@@ -1,0 +1,81 @@
+# Continuous integration: on every push to main, and on every pull request, GitHub builds the
+# project on a fresh Linux machine and runs everything that can be checked without a person.
+# docs/testing.md explains the tests; the badge at the top of the README shows the result.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer commit on the same branch cancels the run of the older one, which nobody wants any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# The workflow only reads the code. (Nothing here needs to write to the repository.)
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # The desktop app is a workspace of the repository, so `npm ci` would download its Electron
+      # program (about 100 MB). The desktop app's unit tests never start Electron, so skip it.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # Exactly the versions in package-lock.json: no surprises from a newer release.
+      - run: npm ci
+      # Builds everything, type-checks the tests, and runs all of them. They start real Redis and
+      # PostgreSQL servers in Docker containers, and GitHub's Ubuntu machines have Docker.
+      - run: npm test
+      # Applies the migrations to an embedded PostgreSQL 18, and tries the constraints and queries.
+      - run: npm run db:check
+      # Lints openapi.yaml, the API's contract.
+      - run: npm run lint:api
+
+  docker:
+    name: Docker image and Compose files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The image that docker-compose.yml runs three ways (the API, the worker, the migrations).
+      - run: docker build --tag circuitlab .
+      - name: Both Compose setups are valid
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+        env:
+          # The production file refuses to load without these three. The values are made up, for
+          # this check only.
+          JWT_SECRET: made-up-for-the-ci-check-and-nothing-else
+          POSTGRES_PASSWORD: madeupforcicheck
+          SITE_ADDRESS: example.test
+      # Building an image doesn't prove it runs: a file missing from its final stage (Swagger UI's, say)
+      # only shows when the container starts. With no database configured the API keeps everything in
+      # memory, which is enough to see that it comes up and serves its documentation.
+      - name: The image starts, and serves the API and its documentation
+        run: |
+          docker run --detach --name api --publish 3000:3000 circuitlab
+          for _ in $(seq 30); do curl --fail --silent http://localhost:3000/health && break; sleep 1; done
+          echo
+          curl --fail --silent --show-error --output /dev/null http://localhost:3000/docs
+          curl --fail --silent --show-error --output /dev/null http://localhost:3000/docs/assets/swagger-ui-bundle.js
+          curl --fail --silent --show-error http://localhost:3000/openapi.json | grep --quiet '"openapi":"3.1.0"'
+      - name: The container's log, if something went wrong
+        if: failure()
+        run: docker logs api
