@@ -60,12 +60,15 @@ flowchart TD
     engine["<b>engine</b><br/>circuits, validation, simulation"]
     netlist["<b>netlist</b><br/>circuits as text files"]
     runner["<b>runner</b><br/>simulation on worker threads"]
+    assistant["<b>assistant</b><br/>drafts circuits with Ollama"]
     contract["<b>api-contract</b><br/>openapi.yaml, and the code that enforces it"]
     database["<b>database</b><br/>migrations, Prisma Client"]
     api["<b>api</b><br/>the NestJS app, and the worker"]
     desktop["<b>desktop</b><br/>the Electron app"]
 
     netlist --> engine
+    assistant --> engine
+    assistant --> netlist
     runner --> engine
     contract --> engine
     contract --> netlist
@@ -74,6 +77,7 @@ flowchart TD
     api --> database
     desktop -. "offline: runs them itself" .-> engine
     desktop -. "offline" .-> netlist
+    desktop -. "the assistant" .-> assistant
     desktop -. "online: HTTP, and the contract's types" .-> api
 ```
 

@@ -13,6 +13,7 @@ import {
   editNetlistPage,
   newDrawingPage,
   newLocalDrawingPage,
+  newLocalNetlistPage,
   newNetlistPage,
 } from "./pages/edit-pages";
 import { homePage } from "./pages/home";
@@ -43,6 +44,7 @@ route("/library", libraryPage);
 route("/library/:id", openLibraryItemPage);
 route("/local", localPage);
 route("/local/new", newLocalDrawingPage);
+route("/local/new/netlist", newLocalNetlistPage);
 route("/local/draw", editLocalDrawingPage);
 route("/local/netlist", editLocalNetlistPage);
 

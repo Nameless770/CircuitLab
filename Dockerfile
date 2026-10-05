@@ -24,6 +24,7 @@ ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/
 COPY packages/netlist/package.json packages/netlist/
+COPY packages/assistant/package.json packages/assistant/
 COPY packages/runner/package.json packages/runner/
 COPY packages/api-contract/package.json packages/api-contract/
 COPY packages/database/package.json packages/database/

@@ -40,6 +40,16 @@ export interface DesktopBridge {
   deleteFromLibrary(id: string): Promise<LocalResult<null>>;
   /** Commands from the app menu ("open", "new", "home"). */
   onMenuCommand(listener: (command: MenuCommand) => void): void;
+  /** Whether Ollama answers, which models it has, and which one the assistant would use. Never fails: what's wrong is in the answer. */
+  assistantStatus(): Promise<AssistantStatus>;
+  /** Saves where Ollama is and which model to use (null: back to the default). Resolves to the settings now in use. */
+  setAssistant(change: AssistantSettingsChange): Promise<LocalResult<AppSettings>>;
+  /** Asks the assistant for a circuit, or for a change to the netlist in `request`. Progress arrives through onAssistantProgress. */
+  askAssistant(request: AssistantRequest): Promise<LocalResult<AssistantAnswer>>;
+  /** Stops the question being worked on, if any: askAssistant then ends with the code "cancelled". */
+  cancelAssistant(): Promise<void>;
+  /** Before each time the model is asked, while askAssistant is working. */
+  onAssistantProgress(listener: (progress: AssistantProgress) => void): void;
 }
 
 export type MenuCommand = "open" | "new" | "home" | "library" | "settings";
@@ -90,7 +100,80 @@ export interface AppSettings {
   readonly defaultApiUrl: string;
   /** CIRCUITLAB_API_URL is set (development, tests): it wins over the saved address for this run. */
   readonly fromEnvironment: boolean;
+  readonly assistant: AssistantSettings;
 }
+
+/** Where Ollama is, and which of its models the assistant uses. */
+export interface AssistantSettings {
+  /** The address in use right now. */
+  readonly url: string;
+  /** What the Settings screen saved, or null if nothing was ever saved. */
+  readonly savedUrl: string | null;
+  readonly defaultUrl: string;
+  /** CIRCUITLAB_OLLAMA_URL is set (tests): it wins over the saved address for this run. */
+  readonly fromEnvironment: boolean;
+  /** The model chosen in Settings, or null for "the first one Ollama lists". */
+  readonly savedModel: string | null;
+}
+
+/** What to change in the assistant's settings. A part that's left out stays as it is; null goes back to the default. */
+export interface AssistantSettingsChange {
+  readonly url?: string | null;
+  readonly model?: string | null;
+}
+
+export interface AssistantModel {
+  readonly name: string;
+  /** "3.2B", when Ollama says. */
+  readonly parameterSize?: string;
+  readonly sizeGigabytes: number;
+}
+
+export interface AssistantStatus {
+  readonly url: string;
+  /** The address is this computer, so nothing typed to the assistant leaves it. */
+  readonly local: boolean;
+  /** Every model Ollama has, newest first. */
+  readonly models: readonly AssistantModel[];
+  /** The one that would be used, or null when there is none. */
+  readonly model: string | null;
+  /** What is wrong, written for people: Ollama isn't running, has no models, or the chosen model is gone. */
+  readonly problem?: string;
+}
+
+export interface AssistantRequest {
+  /** What the person wants, in their own words. */
+  readonly request: string;
+  /** The netlist to change (the text in the editor). Left out when the request is for a new circuit. */
+  readonly netlist?: string;
+}
+
+/** Sent while a question is being worked on, before each time the model is asked. */
+export interface AssistantProgress {
+  /** 1 for the first answer. */
+  readonly attempt: number;
+  readonly of: number;
+  /** How many problems the model's last answer had, which it is being asked to fix. 0 for the first. */
+  readonly problems: number;
+}
+
+export type AssistantAnswer =
+  | {
+      readonly kind: "circuit";
+      readonly model: string;
+      readonly attempts: number;
+      /** The model's own sentence on how the circuit works. */
+      readonly idea: string;
+      /** Checked: it reads back as `circuit`. */
+      readonly netlist: string;
+      readonly circuit: LocalCircuit;
+      /** Every row, for a circuit with up to 4 inputs and no feedback loop; null otherwise. */
+      readonly table: LocalTruthTablePage | null;
+    }
+  /** The model said it can't make that. */
+  | { readonly kind: "declined"; readonly message: string }
+  /** Every answer had problems; these are the last one's. */
+  | { readonly kind: "invalid"; readonly attempts: number; readonly problems: readonly string[] };
 
 /** A circuit as the window sends it: what the netlist file holds. */
 export interface CircuitData {

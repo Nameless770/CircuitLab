@@ -1,3 +1,4 @@
+import { assistantPanel } from "../assistant/panel";
 import { appendAll, h } from "../dom";
 import { navigate, setLeaveCheck, type PageContext } from "../router";
 import { errorDetails, pageHeader, runAction, successBox } from "../ui";
@@ -28,7 +29,7 @@ both = AND(A, B)
 Y = OUTPUT(both)
 `;
 
-export function openNetlistEditor({ root, signal }: PageContext, options: NetlistEditorOptions): void {
+export function openNetlistEditor({ root, signal, query }: PageContext, options: NetlistEditorOptions): void {
   let dirty = false;
   const text = h("textarea", { class: "code", spellcheck: "false", wrap: "off", "aria-label": "Netlist" }, options.text);
   text.addEventListener("input", () => {
@@ -96,14 +97,27 @@ export function openNetlistEditor({ root, signal }: PageContext, options: Netlis
     { signal },
   );
 
+  // The assistant drafts a circuit and puts it here only when asked to; what's typed here stays unsaved until saved.
+  const assistant = assistantPanel({
+    currentText: () => text.value,
+    replaceText: (next) => {
+      text.value = next;
+      dirty = true;
+      messages.replaceChildren();
+    },
+    startsEmpty: options.text.trim() === "" || options.text.trim() === NETLIST_TEMPLATE.trim(),
+    focus: query.get("ask") === "1",
+  });
+
   appendAll(
     root,
     pageHeader(options.title, checkButton, saveButton, h("a", { class: "button", href: `#${options.cancelPath}` }, "Cancel")),
     options.note === undefined ? null : h("p", { class: "alert alert-info" }, options.note),
     messages,
+    assistant,
     h("div", { class: "netlist-layout" }, text, cheatSheet()),
   );
-  text.focus();
+  if (query.get("ask") !== "1") text.focus(); // with ?ask=1 the cursor is in the assistant's box
 }
 
 function cheatSheet(): HTMLElement {

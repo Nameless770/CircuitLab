@@ -225,20 +225,46 @@ installs for the current user only, so it needs no administrator rights.
 protected your PC". Click "More info", then "Run anyway". Signing needs a code-signing
 certificate, which costs money and needs a verified identity; see the known shortcuts below.
 
+### 11. The assistant
+
+A panel in the netlist editor that drafts circuits with a model running in Ollama. How it works, and
+how good it is, is in [assistant.md](assistant.md). What belongs here is how it sits in the app:
+
+- **In the main process,** like offline mode: the window may only talk to its own origin, and
+  Ollama is another address. [assistant.ts](../apps/desktop/electron/assistant.ts) chooses the model and
+  prepares the draft (the circuit the window shows, and its truth table when it is small); the
+  work is in `@circuitlab/assistant`, which Vite bundles into `main.js` like the engine.
+- **Five more functions in the bridge:** `assistantStatus`, `setAssistant`, `askAssistant`,
+  `cancelAssistant` and `onAssistantProgress`. The window sends a request and gets a draft back. The
+  window never gives an address for the request to go to: that is a setting, checked when saved.
+- **Progress is pushed, not asked for.** A question can take a few seconds, so the main process sends
+  "attempt 2 of 3: fixing 1 problem" to the window as it goes. The bridge can only add listeners, never
+  remove them, so there is one listener for the whole window, which passes progress on to whichever panel
+  is waiting.
+- **Cancel** aborts the request to Ollama (an `AbortController` per question). One question at a
+  time: asking again stops the one before.
+- **One more setting file part.** `settings.json` now also holds Ollama's address and the model.
+  Each part is read on its own, so a bad address doesn't lose the others, and saving one part keeps the rest.
+- **One place for it:** the netlist editor, which both modes use. Offline had no way to start a netlist
+  from scratch, so there is now `#/local/new/netlist`.
+
 ## Testing
 
 - **Unit tests** (`apps/desktop/test`, run by `npm test`): the layout, the editing rules, offline
-  simulation, CSV export, and a test that the window's copy of the pin counts still matches the
-  engine's.
+  simulation, CSV export, a test that the window's copy of the pin counts still matches the
+  engine's, and the assistant's part (which model is chosen, what the window is shown, settings that
+  are read back).
 - **The smoke test** ([smoke.mjs](../apps/desktop/scripts/smoke.mjs)) checks that the screens
   and pieces fit together:
   - **Setup.** It starts an API in memory and opens the *built* app with Playwright.
-  - **Steps.** It clicks through both modes in 17 steps, and saves a screenshot of each:
+  - **Steps.** It clicks through both modes in 23 steps, and saves a screenshot of each:
     - starting with a `.net` file, and a second launch handing one over;
     - setting the server address in Settings;
     - examples, a latch;
     - the library: saving with no dialog, listing, searching, opening, deleting, exporting a file;
-    - an account, sharing, a background job, editing, uploading.
+    - an account, sharing, a background job, editing, uploading;
+    - the assistant, against a fake Ollama: choosing a model in Settings, drafting a circuit offline
+      and online, using it, changing a circuit and undoing, Cancel, a refusal, Ollama not running.
   - **Isolation.** It uses a throwaway profile (`CIRCUITLAB_USER_DATA_DIR`), so it never signs
     you out or fills your list of recent files.
 
@@ -257,6 +283,7 @@ Things I chose not to do yet, and why:
 | Offline simulation runs in the main process, so a huge page of rows could freeze the app briefly | A page is at most 4,096 rows; normal circuits take milliseconds | Run it on `@circuitlab/runner`'s worker threads, like the API |
 | The drawing editor has no undo and no zoom, and stops at 400 gates | Big circuits can be edited as netlist text | Undo stack; zoom with the SVG viewBox |
 | Saving a drawing to a file rewrites it, losing comments | The app warns before you do it; "Edit netlist" keeps the text exactly | Keep comments by editing the text instead of rewriting it |
+| The assistant is in the netlist editor only, not the drawing editor | A circuit it drafts is saved like any other and then drawn automatically | A "describe it" box in the drawing editor |
 | The installer isn't code-signed, so Windows SmartScreen warns before running it | Fine for a demo; signing needs a paid certificate and a verified identity | A code-signing certificate (or Azure Trusted Signing), set up in electron-builder |
 | No automatic updates: a new version means running a new installer | Releases are rare | electron-updater, with the installers published somewhere it can check |
 | The installer makes CircuitLab the program for every `.net` file, and other tools use that extension too (KiCad writes netlists as `.net`) | CircuitLab's own files are `.net`; you can pick another program with "Open with" | Ask during installation, or use a more specific extension |

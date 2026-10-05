@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -29,6 +30,48 @@ const api = await createApp({ config: new AppConfig(), logLevels: ["error"] });
 await api.listen(0, "127.0.0.1");
 const apiUrl = `http://127.0.0.1:${api.getHttpServer().address().port}`;
 console.log(`API for this run: ${apiUrl}`);
+
+// --- an Ollama just for this run: it answers the way Ollama does (the assistant needs no real model to be tested)
+const ollamaRequests = [];
+const spec = (name, idea, inputs, outputs) => ({ idea, name, inputs, signals: [], outputs: Object.entries(outputs).map(([key, formula]) => ({ name: key, formula })) });
+function ollamaAnswer(question) {
+  if (question.includes("Change it like this")) {
+    return spec("Inverted-carry adder", "The same circuit, with the carry turned upside down.", ["A", "B", "CIN"], { SUM: "A ^ B ^ CIN", COUT: "!(A + B + CIN >= 2)" });
+  }
+  if (question.includes("full adder")) return spec("Full adder", "SUM is the parity of the inputs, and COUT is 1 when at least two are 1.", ["A", "B", "CIN"], { SUM: "A ^ B ^ CIN", COUT: "A + B + CIN >= 2" });
+  if (question.includes("pancakes")) return spec("Nothing", "Pancakes are not a digital circuit.", [], {});
+  return spec("An AND gate", "Both inputs must be 1.", ["A", "B"], { Y: "A & B" });
+}
+const fakeOllama = createServer((request, response) => {
+  const chunks = [];
+  request.on("data", (chunk) => chunks.push(chunk));
+  request.on("end", () => {
+    const body = chunks.length === 0 ? undefined : JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    ollamaRequests.push({ method: request.method, url: request.url, body });
+    const send = (status, data) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(data));
+    };
+    if (request.url === "/api/tags") {
+      return send(200, {
+        models: [
+          { name: "fake-model:1b", size: 1_300_000_000, details: { parameter_size: "1.2B" } },
+          { name: "other-model:3b", size: 2_000_000_000, details: { parameter_size: "3B" } },
+        ],
+      });
+    }
+    if (request.url === "/api/chat") {
+      const question = body.messages.at(-1).content;
+      if (question.includes("slow")) return; // never answers: the test presses Cancel
+      return send(200, { message: { role: "assistant", content: JSON.stringify(ollamaAnswer(question)) }, done: true });
+    }
+    send(404, { error: "not found" });
+  });
+});
+await new Promise((resolve) => fakeOllama.listen(0, "127.0.0.1", resolve));
+const ollamaUrl = `http://127.0.0.1:${fakeOllama.address().port}`;
+console.log(`Ollama for this run: ${ollamaUrl}`);
+const chatRequests = () => ollamaRequests.filter((entry) => entry.url === "/api/chat");
 
 // Throwaway accounts that only exist in this run's in-memory API.
 const password = `smoke test passphrase ${Date.now()}`;
@@ -117,6 +160,21 @@ try {
     await go("#/");
     await see("Server online");
     await screenshot("home");
+  });
+
+  await step("settings: point the assistant at this run's Ollama, and choose a model", async () => {
+    await go("#/settings");
+    await page.getByLabel("Ollama address").fill(ollamaUrl + "/");
+    await page.getByRole("button", { name: "Save address" }).click();
+    await see(`Ollama answers at ${ollamaUrl}, on this computer. It has 2 models.`);
+    await page.getByLabel("Model").selectOption("other-model:3b");
+    await see("The assistant uses other-model:3b.");
+    const saved = JSON.parse(readFileSync(path.join(profileDir, "settings.json"), "utf8"));
+    assert.equal(saved.assistantUrl, ollamaUrl); // saved without the trailing slash
+    assert.equal(saved.assistantModel, "other-model:3b");
+    assert.equal(saved.apiUrl, apiUrl, "saving the assistant's settings kept the server address");
+    await screenshot("settings-assistant");
+    await go("#/"); // the next step starts from the home screen
   });
 
   // ---------------------------------------------------------------------------------- offline
@@ -211,6 +269,89 @@ try {
     assert.deepEqual(readdirSync(path.join(profileDir, "library")).filter((name) => name.endsWith(".json")).length, 1);
   });
 
+  // ------------------------------------------------------------------------------ the assistant
+  await step("assistant: draft a circuit, look at it, use it in the editor and save it", async () => {
+    await go("#/local/new/netlist?ask=1");
+    await see("Ask the assistant");
+    await see("Using other-model:3b in Ollama, on this computer");
+    await page.getByLabel("What circuit do you want?").fill("a full adder");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("SUM is the parity of the inputs");
+    await see("Made by other-model:3b.");
+    assert.equal(await page.locator(".draft .truth-table tbody tr").count(), 8, "the whole truth table of 3 inputs");
+    assert.match(await page.locator(".draft .netlist-text").textContent(), /xor1 = XOR\(A, B, CIN\)/);
+    await screenshot("assistant-draft");
+    // What reached Ollama: the chosen model, the schema, the recipes for this request, and the request.
+    const asked = chatRequests().at(-1).body;
+    assert.equal(asked.model, "other-model:3b");
+    assert.equal(asked.stream, false);
+    assert.equal(asked.options.num_ctx, 8192);
+    assert.ok(asked.format && asked.format.properties.outputs, "the answer is asked for in the schema's shape");
+    assert.match(asked.messages[0].content, /Request: a full adder with inputs A, B and CIN/);
+    assert.equal(asked.messages.at(-1).content, "Design this circuit: a full adder");
+    // Nothing is in the editor until "Use this".
+    assert.doesNotMatch(await page.locator("textarea.code").inputValue(), /XOR/);
+    await page.getByRole("button", { name: "Use this in the editor" }).click();
+    await see("The editor now holds the assistant's circuit");
+    assert.match(await page.locator("textarea.code").inputValue(), /xor1 = XOR\(A, B, CIN\)/);
+    await page.getByRole("button", { name: "Check", exact: true }).click();
+    await see("Looks good: ");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.locator("h1", { hasText: "Full adder" }).waitFor();
+    await see("In your library");
+    await screenshot("assistant-saved");
+  });
+
+  await step("assistant: change the circuit that is open, and undo", async () => {
+    await go("#/local/netlist");
+    await see("Edit netlist: Full adder");
+    assert.ok(await page.getByRole("radio", { name: /Change the netlist below/ }).isChecked(), "an editor with a circuit in it changes it");
+    await page.getByLabel("What circuit do you want?").fill("invert the carry output");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("The same circuit, with the carry turned upside down.");
+    // The model was shown the circuit as it is, in its own format.
+    const question = chatRequests().at(-1).body.messages.at(-1).content;
+    assert.match(question, /^Here is the current circuit:\n\{/);
+    assert.ok(question.includes('"formula":"A ^ B ^ CIN"'), "the open circuit's formulas");
+    assert.ok(question.endsWith("Change it like this: invert the carry output\nAnswer with the complete new circuit."));
+    await page.getByRole("button", { name: "Use this in the editor" }).click();
+    assert.match(await page.locator("textarea.code").inputValue(), /NOT\(/);
+    await page.getByRole("button", { name: "Undo" }).click();
+    assert.doesNotMatch(await page.locator("textarea.code").inputValue(), /NOT\(/, "Undo brings back what was there");
+    // And once more, this time keeping it.
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("The same circuit, with the carry turned upside down.");
+    await page.getByRole("button", { name: "Use this in the editor" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.locator("h1", { hasText: "Inverted-carry adder" }).waitFor();
+    await screenshot("assistant-changed");
+    // Leave the library as the steps after this one expect it.
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page.waitForFunction(() => location.hash === "#/library");
+  });
+
+  await step("assistant: Cancel stops a slow answer, and a request that isn't a circuit is declined", async () => {
+    await go("#/local/new/netlist?ask=1");
+    await see("Using other-model:3b");
+    const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+    assert.equal(await cancel.isVisible(), false, "Cancel only shows while a question is being worked on");
+    await page.getByLabel("What circuit do you want?").fill("a slow circuit");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("Asking other-model:3b");
+    await cancel.click();
+    await see("Stopped.");
+    await cancel.waitFor({ state: "hidden" });
+    assert.ok(await page.getByRole("button", { name: "Ask", exact: true }).isEnabled(), "Ask works again");
+    await page.getByLabel("What circuit do you want?").fill("pancakes");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("The assistant can't make that.");
+    await see("Pancakes are not a digital circuit.");
+    await page.getByLabel("What circuit do you want?").fill("   ");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("Write what circuit you want first.");
+    await screenshot("assistant-declined");
+  });
+
   // ----------------------------------------------------------------------------------- online
   await step("online: create an account", async () => {
     await go("#/register");
@@ -220,6 +361,23 @@ try {
     await page.getByRole("button", { name: "Create account" }).click();
     await see("You have no circuits yet");
     await see("Ada"); // in the header
+  });
+
+  await step("online: the assistant is in the online netlist editor too", async () => {
+    await go("#/circuits/new");
+    await page.getByRole("link", { name: "Describe it" }).click();
+    await see("Ask the assistant");
+    await page.getByLabel("What circuit do you want?").fill("a full adder");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await see("SUM is the parity of the inputs");
+    await page.getByRole("button", { name: "Use this in the editor" }).click();
+    await page.getByRole("button", { name: "Save to my account" }).click();
+    await see("Simulated by the server.");
+    await see("Full adder");
+    await screenshot("assistant-online");
+    // Leave the account as the steps after this one expect it: no circuits yet.
+    await page.getByRole("button", { name: "Delete" }).click();
+    await see("You have no circuits yet");
   });
 
   let circuitHash = "";
@@ -303,6 +461,26 @@ try {
     await screenshot("online-list");
   });
 
+  await step("assistant: Ollama not running is explained, and the default address comes back", async () => {
+    await go("#/settings");
+    await page.getByLabel("Ollama address").fill("http://127.0.0.1:1");
+    await page.getByRole("button", { name: "Save address" }).click();
+    await see("Can't reach Ollama at http://127.0.0.1:1");
+    await go("#/local/new/netlist?ask=1");
+    await see("Can't reach Ollama at http://127.0.0.1:1"); // the panel's own line
+    await page.getByLabel("What circuit do you want?").fill("a full adder");
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await page.locator(".alert-error", { hasText: "Can't reach Ollama" }).waitFor();
+    await screenshot("assistant-no-ollama");
+    await go("#/settings");
+    await page.getByRole("button", { name: "Use Ollama's default" }).click();
+    await see("Saved. The assistant now looks for Ollama at http://127.0.0.1:11434.");
+    const saved = JSON.parse(readFileSync(path.join(profileDir, "settings.json"), "utf8"));
+    assert.equal(saved.assistantUrl, undefined, "the default isn't saved as an address");
+    assert.equal(saved.assistantModel, "other-model:3b", "the chosen model is kept");
+    assert.equal(saved.apiUrl, apiUrl, "the server address is kept");
+  });
+
   assert.deepEqual(problems, [], "no errors in the window's console");
   console.log(`\nAll steps passed. Screenshots: ${shotsDir}`);
 } catch (error) {
@@ -312,6 +490,8 @@ try {
   process.exitCode = 1;
 } finally {
   await app.close();
+  fakeOllama.closeAllConnections();
+  fakeOllama.close();
   await api.close();
   rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

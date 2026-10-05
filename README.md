@@ -23,6 +23,10 @@ explains what was built and why.
   huge one in the background and download it when it's done.
 - **Latches and flip-flops.** A circuit with a feedback loop runs step by step and remembers its state
   between steps.
+- **An assistant that drafts circuits.** Describe one in words ("a 2-to-1 multiplexer with inputs D0, D1
+  and SEL") and a language model running on your own computer, in [Ollama](https://ollama.com), drafts
+  it. You see its truth table and check it before it goes in the editor
+  ([docs/assistant.md](docs/assistant.md)).
 - **Offline or online.** Offline, circuits live in the app's library and the app simulates them
   itself. Online, they live in your account: private, public, or shared with other people as viewers
   or editors.
@@ -118,6 +122,7 @@ the package structure and the journey of one simulation and of one background jo
 | [design-patterns.md](docs/design-patterns.md) | The patterns in the code, and why each one is there |
 | [testing.md](docs/testing.md) | How it is tested, and what the tests found |
 | [desktop-app.md](docs/desktop-app.md) | The desktop app: how it works, the decisions, its known shortcuts |
+| [assistant.md](docs/assistant.md) | The assistant: why the model writes formulas, how a draft is checked, and how good it is (measured) |
 | [docker.md](docs/docker.md) | What runs in Docker, and why it's built this way |
 | [system-design.md](docs/system-design.md) | Scaling to thousands of users, with the measurements behind it |
 | [deploy.md](docs/deploy.md) | Putting it online: HTTPS, secrets, backups |
@@ -131,6 +136,7 @@ Everything compiles to CommonJS with tsc, except the desktop app, which Vite bun
 packages/engine/        @circuitlab/engine        data model, validation, sorting, simulation, truth tables
                                                   (pure TypeScript: no Node or framework imports)
 packages/netlist/       @circuitlab/netlist       reads and writes netlist files, streaming
+packages/assistant/     @circuitlab/assistant     drafts circuits with a model running in Ollama, and checks every draft
 packages/runner/        @circuitlab/runner        SimulationPool: runs simulations on worker threads
 packages/api-contract/  @circuitlab/api-contract  openapi.yaml, plus the framework-free code that enforces it
 packages/database/      @circuitlab/database      PostgreSQL 18 migrations, schema.prisma, the Prisma Client, a local dev server
@@ -149,10 +155,11 @@ examples/               demos, and sample netlists in examples/netlists/
 **How the pieces depend on each other:**
 - The engine depends on nothing.
 - The netlist and runner packages depend only on the engine.
+- The assistant depends on the engine and the netlist package, and only the desktop app uses it.
 - The API contract depends on those three.
 - The database package depends on nothing at runtime but Prisma (its check uses the engine and netlist).
 - The app depends on all of them.
-- The desktop app runs the engine and netlist packages offline, and talks to the API over HTTP
+- The desktop app runs the engine, netlist and assistant packages itself, and talks to the API over HTTP
   online (it only imports the contract's *types*).
 
 ## Commands
@@ -177,6 +184,7 @@ npm run start:worker   # phase 10: a worker process that computes truth-table jo
 npm run dev:desktop    # the desktop app, with hot reload (run start:api too, for online mode)
 npm run start:desktop  # the desktop app, built as users get it
 npm run smoke:desktop  # clicks through the real desktop app (Playwright); screenshots in apps/desktop/dist/smoke/
+npm run eval:assistant # how good is the assistant with the model you have? Needs Ollama running (docs/assistant.md)
 npm run package:desktop # the Windows installer: apps/desktop/release/CircuitLab-Setup-0.1.0.exe
 npm run lint:api       # checks openapi.yaml (Redocly, fetched on first use)
 npm run db:start       # phase 6: a local PostgreSQL 18 on port 5433, nothing to install (leave it running)
@@ -319,6 +327,13 @@ In both modes, click a circuit's inputs to switch them and watch the wires light
 a feedback loop (a latch) runs step by step and remembers its state. Truth tables page through
 any size, and export to CSV.
 
+**The assistant** is in every netlist editor (and Home > Offline > Ask the assistant): describe a
+circuit, and a model running in Ollama on your computer drafts it. The app checks the draft, shows its
+truth table, and puts it in the editor only when you say so. It works with any model you have
+downloaded (choose it in Settings), and says plainly when Ollama isn't running. With the 3-billion
+parameter model it was built on, about half of the requests come out right, and the numbers, and why the
+model writes formulas instead of gates, are in [docs/assistant.md](docs/assistant.md).
+
 To install it like any other program, run `npm run package:desktop` and run
 `apps/desktop/release/CircuitLab-Setup-0.1.0.exe`. It isn't code-signed yet, so Windows asks
 first: "More info", then "Run anyway". Once installed, double-clicking a `.net` file opens it in
@@ -402,7 +417,7 @@ development.
 
 ## Testing
 
-`npm test` runs 782 tests in about 35 seconds (Docker must be running, for Redis).
+`npm test` runs 996 tests in about 40 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.
@@ -415,6 +430,10 @@ development.
 - **Do the tests catch bugs?** 31 deliberately planted bugs were all caught.
 - **Time:** rules that depend on time (token and session expiry, sign-in throttling, job results
   and allowances) are tested by moving an injected clock instead of waiting.
+- **The assistant:** the formulas it reads, the circuits it builds from them, and every recipe in its
+  prompt are checked against ordinary code, row by row, through the real engine. The model itself is
+  played by a script and by a fake Ollama, so no GPU is needed. `npm run eval:assistant` measures a real
+  model.
 - **Coverage:** 95% of statements.
 - **Continuous integration:** GitHub Actions runs the tests, the migrations check, the contract lint and a
   Docker build on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)); the
@@ -461,6 +480,8 @@ The engine, the netlist reader and the worker-thread runner are packages of thei
   step for latches and flip-flops) and makes truth tables.
 - **`@circuitlab/netlist`** reads and writes circuits as text files, streaming.
 - **`@circuitlab/runner`** runs simulations on a pool of worker threads, with cancellation and limits.
+- **`@circuitlab/assistant`** asks a language model in Ollama for a circuit, and checks the answer
+  ([docs/assistant.md](docs/assistant.md) has its design; it isn't covered by libraries.md).
 
 [docs/libraries.md](docs/libraries.md) has their reference: every function, the error types, the netlist
 format, and what the worker pool does when it is busy.
@@ -482,6 +503,7 @@ format, and what the worker pool does when it is busy.
 | 11 | Docker | `docker-compose up` starts the API, Postgres, and Redis | Done |
 | 12 | System design | Design document for scaling to thousands of users | Done |
 | 13 | Polish | README, architecture diagram, Swagger, deployed demo | Done, except hosting the demo (see [docs/deploy.md](docs/deploy.md)) |
+| 14 | AI assistant | A language model running in Ollama drafts circuits from a description; every draft is checked | Done ([docs/assistant.md](docs/assistant.md)) |
 
 ## Tooling notes
 

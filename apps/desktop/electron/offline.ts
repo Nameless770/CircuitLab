@@ -12,6 +12,7 @@ import {
   type SimulationInputs,
   type SimulationState,
 } from "@circuitlab/engine";
+import { AssistantError } from "@circuitlab/assistant";
 import { NetlistError, formatNetlist, parseNetlist } from "@circuitlab/netlist";
 import type { CircuitData, LocalCircuit, LocalProblem, LocalSimulateRequest, LocalSimulation, LocalTruthTablePage } from "./bridge";
 import { NotInLibraryError, SettingError } from "./helpers";
@@ -139,6 +140,8 @@ export function toProblem(error: unknown): LocalProblem {
   if (error instanceof SimulationInputError) {
     return { code: "invalid-inputs", message: "The input values don't fit the circuit.", issues: error.issues.map((issue) => ({ code: issue.code, message: issue.message })) };
   }
+  // The assistant's own codes: "ollama-unreachable", "model-not-found", "cancelled", ...
+  if (error instanceof AssistantError) return { code: error.code, message: error.message };
   if (error instanceof SettingError) return { code: "invalid-setting", message: error.message };
   if (error instanceof NotInLibraryError) return { code: "not-found", message: error.message };
   if (error instanceof RangeError) return { code: "too-large", message: error.message };

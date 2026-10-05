@@ -8,5 +8,5 @@
     "types": ["node"]
   },
   "include": ["*.ts"],
-  "references": [{ "path": "../packages/engine" }, { "path": "../packages/netlist" }, { "path": "../packages/runner" }, { "path": "../packages/api-contract" }, { "path": "../apps/api" }]
+  "references": [{ "path": "../packages/engine" }, { "path": "../packages/netlist" }, { "path": "../packages/assistant" }, { "path": "../packages/runner" }, { "path": "../packages/api-contract" }, { "path": "../apps/api" }]
 }

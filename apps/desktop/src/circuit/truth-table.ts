@@ -30,7 +30,7 @@ export function truthTableSection(circuit: ViewableCircuit, backend: CircuitBack
     offset = newOffset;
     try {
       const page = await backend.truthTablePage(offset, ROWS_PER_PAGE, signal);
-      tableArea.replaceChildren(table(page));
+      tableArea.replaceChildren(renderTruthTable(page));
       pager.replaceChildren(...pagerButtons(page));
     } catch (error) {
       if (!signal.aborted) tableArea.replaceChildren(errorBox(error));
@@ -80,7 +80,8 @@ export function truthTableSection(circuit: ViewableCircuit, backend: CircuitBack
   return section;
 }
 
-function table(page: TruthTableWindow): HTMLElement {
+/** The rows of one page of a truth table, as the circuit pages show them (the assistant uses it for its preview too). */
+export function renderTruthTable(page: TruthTableWindow): HTMLElement {
   const header = h(
     "tr",
     {},

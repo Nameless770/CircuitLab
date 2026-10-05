@@ -5,8 +5,10 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, dialog, ipcMain, net, protocol, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
-import type { AppSettings, CircuitData, LibrarySaveRequest, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
-import { netlistFileFromArgs, normalizeApiUrl } from "./helpers";
+import { AssistantError, DEFAULT_OLLAMA_URL, OllamaClient, listModels } from "@circuitlab/assistant";
+import { askAssistant, checkAssistant, chooseModel } from "./assistant";
+import type { AppSettings, AssistantRequest, AssistantSettingsChange, CircuitData, LibrarySaveRequest, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
+import { SettingError, netlistFileFromArgs, normalizeApiUrl, normalizeOllamaUrl, readSavedSettings, type SavedSettings } from "./helpers";
 import { Library } from "./library";
 import * as offline from "./offline";
 
@@ -20,6 +22,8 @@ import * as offline from "./offline";
 const DEFAULT_API_URL = "http://localhost:3000";
 /** Set for development and tests; wins over the address saved in Settings. */
 const ENV_API_URL = process.env["CIRCUITLAB_API_URL"];
+/** Set for tests; wins over the Ollama address saved in Settings. */
+const ENV_OLLAMA_URL = process.env["CIRCUITLAB_OLLAMA_URL"];
 /** Set by scripts/dev.mjs while developing: the window's files then come from Vite (hot reload). */
 const DEV_SERVER_URL = process.env["CIRCUITLAB_DEV_SERVER_URL"];
 /** The built window code (vite build), next to this file's folder: dist/renderer. */
@@ -121,11 +125,8 @@ function createWindow(): void {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Settings: online mode's server address, saved in settings.json in the app's data folder
-
-interface SavedSettings {
-  readonly apiUrl?: string;
-}
+// Settings: online mode's server address, and the assistant's Ollama address and model, saved in
+// settings.json in the app's data folder
 
 let saved: SavedSettings = {};
 
@@ -135,11 +136,15 @@ function settingsFile(): string {
 
 function loadSettings(): void {
   try {
-    const data = JSON.parse(readFileSync(settingsFile(), "utf8")) as { apiUrl?: unknown };
-    saved = typeof data.apiUrl === "string" ? { apiUrl: normalizeApiUrl(data.apiUrl) } : {};
+    saved = readSavedSettings(JSON.parse(readFileSync(settingsFile(), "utf8")));
   } catch {
     saved = {}; // no settings yet, or a damaged file: use the defaults
   }
+}
+
+async function writeSettings(): Promise<void> {
+  await mkdir(path.dirname(settingsFile()), { recursive: true });
+  await writeFile(settingsFile(), `${JSON.stringify(saved, null, 2)}\n`, "utf8");
 }
 
 /** The API address in use: CIRCUITLAB_API_URL if set, else the saved one, else the default. */
@@ -148,15 +153,47 @@ function apiUrl(): string {
   return saved.apiUrl ?? DEFAULT_API_URL;
 }
 
+/** Where Ollama is: the address from the environment if it's set, else the saved one, else the default. */
+function assistantUrl(): string {
+  if (ENV_OLLAMA_URL !== undefined) return ENV_OLLAMA_URL.replace(/\/+$/, "");
+  return saved.assistantUrl ?? DEFAULT_OLLAMA_URL;
+}
+
 function currentSettings(): AppSettings {
-  return { apiUrl: apiUrl(), savedApiUrl: saved.apiUrl ?? null, defaultApiUrl: DEFAULT_API_URL, fromEnvironment: ENV_API_URL !== undefined };
+  return {
+    apiUrl: apiUrl(),
+    savedApiUrl: saved.apiUrl ?? null,
+    defaultApiUrl: DEFAULT_API_URL,
+    fromEnvironment: ENV_API_URL !== undefined,
+    assistant: {
+      url: assistantUrl(),
+      savedUrl: saved.assistantUrl ?? null,
+      defaultUrl: DEFAULT_OLLAMA_URL,
+      fromEnvironment: ENV_OLLAMA_URL !== undefined,
+      savedModel: saved.assistantModel ?? null,
+    },
+  };
 }
 
 /** @throws SettingError for an address that can't be used */
 async function saveApiUrl(text: string | null): Promise<AppSettings> {
-  saved = text === null ? {} : { apiUrl: normalizeApiUrl(text) };
-  await mkdir(path.dirname(settingsFile()), { recursive: true });
-  await writeFile(settingsFile(), `${JSON.stringify(saved, null, 2)}\n`, "utf8");
+  const { apiUrl: _replaced, ...rest } = saved; // the assistant's settings stay as they are
+  saved = text === null ? rest : { ...rest, apiUrl: normalizeApiUrl(text) };
+  await writeSettings();
+  return currentSettings();
+}
+
+/** @throws SettingError for an address or a model name that can't be used */
+async function saveAssistant(change: AssistantSettingsChange): Promise<AppSettings> {
+  const { assistantUrl: oldUrl, assistantModel: oldModel, ...rest } = saved;
+  const url = change.url === undefined ? oldUrl : change.url === null ? undefined : normalizeOllamaUrl(change.url);
+  let model = oldModel;
+  if (change.model !== undefined) {
+    if (change.model !== null && (change.model.trim() === "" || change.model.length > 200)) throw new SettingError("That isn't a model name.");
+    model = change.model === null ? undefined : change.model.trim();
+  }
+  saved = { ...rest, ...(url !== undefined && { assistantUrl: url }), ...(model !== undefined && { assistantModel: model }) };
+  await writeSettings();
   return currentSettings();
 }
 
@@ -226,6 +263,37 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("circuitlab:set-api-url", (_event, text: unknown) => attempt(() => saveApiUrl(typeof text === "string" ? text : null)));
 
+  ipcMain.handle("circuitlab:set-assistant", (_event, change: unknown) => attempt(() => saveAssistant(assistantChange(change))));
+
+  ipcMain.handle("circuitlab:assistant-status", () => checkAssistant(assistantUrl(), saved.assistantModel ?? null));
+
+  ipcMain.handle("circuitlab:assistant-cancel", () => {
+    assistantJob?.abort();
+  });
+
+  ipcMain.handle("circuitlab:assistant-ask", (event, request: unknown) =>
+    attempt(async () => {
+      const asked = assistantRequest(request);
+      assistantJob?.abort(); // one question at a time
+      const job = new AbortController();
+      assistantJob = job;
+      try {
+        const url = assistantUrl();
+        const installed = await listModels(url, job.signal);
+        const chosen = chooseModel(installed.map((model) => model.name), saved.assistantModel ?? null);
+        if (chosen.model === null) throw new AssistantError("model-not-found", chosen.problem ?? "Ollama has no models.");
+        return await askAssistant(new OllamaClient({ model: chosen.model, baseUrl: url }), asked, {
+          signal: job.signal,
+          onProgress: (progress) => {
+            if (!event.sender.isDestroyed()) event.sender.send("circuitlab:assistant-progress", progress);
+          },
+        });
+      } finally {
+        if (assistantJob === job) assistantJob = null;
+      }
+    }),
+  );
+
   ipcMain.handle("circuitlab:take-startup-file", () => {
     const file = startupFile;
     startupFile = null; // only once: a reload of the window mustn't open it again
@@ -292,6 +360,28 @@ function registerIpcHandlers(): void {
       return target;
     }),
   );
+}
+
+/** The question being worked on, so that Cancel can stop it. */
+let assistantJob: AbortController | null = null;
+
+/** What the window sends is checked like anything else that comes from it. */
+function assistantRequest(value: unknown): AssistantRequest {
+  const record = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  if (typeof record["request"] !== "string") throw new SettingError("Write what circuit you want first.");
+  const netlist = record["netlist"];
+  return { request: record["request"], ...(typeof netlist === "string" && { netlist }) };
+}
+
+function assistantChange(value: unknown): AssistantSettingsChange {
+  const record = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  const part = (key: string): string | null | undefined => {
+    const entry = record[key];
+    return typeof entry === "string" || entry === null ? entry : undefined;
+  };
+  const url = part("url");
+  const model = part("model");
+  return { ...(url !== undefined && { url }), ...(model !== undefined && { model }) };
 }
 
 /** Runs `work` and packs the outcome for the window: a value, or the error as data. */

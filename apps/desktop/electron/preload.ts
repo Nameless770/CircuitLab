@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopBridge, MenuCommand } from "./bridge";
+import type { AssistantProgress, DesktopBridge, MenuCommand } from "./bridge";
 
 /**
  * Runs in the window before its own code, with access to Electron's IPC. It exposes exactly the
@@ -27,6 +27,13 @@ const bridge: DesktopBridge = {
   deleteFromLibrary: (id) => ipcRenderer.invoke("circuitlab:library-delete", id),
   onMenuCommand: (listener) => {
     ipcRenderer.on("circuitlab:menu", (_event, command: MenuCommand) => listener(command));
+  },
+  assistantStatus: () => ipcRenderer.invoke("circuitlab:assistant-status"),
+  setAssistant: (change) => ipcRenderer.invoke("circuitlab:set-assistant", change),
+  askAssistant: (request) => ipcRenderer.invoke("circuitlab:assistant-ask", request),
+  cancelAssistant: () => ipcRenderer.invoke("circuitlab:assistant-cancel"),
+  onAssistantProgress: (listener) => {
+    ipcRenderer.on("circuitlab:assistant-progress", (_event, progress: AssistantProgress) => listener(progress));
   },
 };
 

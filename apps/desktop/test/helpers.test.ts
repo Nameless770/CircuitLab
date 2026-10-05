@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SettingError, netlistFileFromArgs, normalizeApiUrl } from "../electron/helpers";
+import { SettingError, isLocalAddress, netlistFileFromArgs, normalizeApiUrl, normalizeOllamaUrl, readSavedSettings } from "../electron/helpers";
 
 describe("netlistFileFromArgs", () => {
   it("finds the .net file Windows passes when a file is double-clicked", () => {
@@ -36,5 +36,49 @@ describe("normalizeApiUrl", () => {
     expect(() => normalizeApiUrl("ftp://example.com")).toThrow(/http:\/\/ or https:\/\//);
     expect(() => normalizeApiUrl("http://ada:secret@example.com")).toThrow(/user name and password/);
     expect(() => normalizeApiUrl("http://example.com/?x=1")).toThrow(/\? or #/);
+  });
+});
+
+describe("normalizeOllamaUrl", () => {
+  it("writes the address one way, like the server address", () => {
+    expect(normalizeOllamaUrl(" http://127.0.0.1:11434/ ")).toBe("http://127.0.0.1:11434");
+    expect(normalizeOllamaUrl("http://gpu-box.local:11434")).toBe("http://gpu-box.local:11434");
+  });
+
+  it("refuses a bad address, with an example that fits Ollama", () => {
+    expect(() => normalizeOllamaUrl("localhost:11434")).toThrow(SettingError);
+    expect(() => normalizeOllamaUrl("nonsense")).toThrow(/Write it like http:\/\/localhost:11434/);
+    expect(() => normalizeOllamaUrl("ftp://x")).toThrow(/http:\/\/ or https:\/\//);
+  });
+});
+
+describe("isLocalAddress", () => {
+  it("is true for this computer, in the ways it can be written", () => {
+    for (const address of ["http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434", "http://ollama.localhost:11434"]) expect(isLocalAddress(address), address).toBe(true);
+  });
+
+  it("is false for anything else, and for what isn't an address", () => {
+    for (const address of ["http://192.168.1.20:11434", "https://ollama.example.com", "http://localhost.example.com", "nonsense", ""]) expect(isLocalAddress(address), address).toBe(false);
+  });
+});
+
+describe("readSavedSettings", () => {
+  it("reads every part, writing the addresses one way", () => {
+    expect(readSavedSettings({ apiUrl: "http://localhost:3000/", assistantUrl: "http://127.0.0.1:11434/", assistantModel: " llama3.2:3b " })).toEqual({
+      apiUrl: "http://localhost:3000",
+      assistantUrl: "http://127.0.0.1:11434",
+      assistantModel: "llama3.2:3b",
+    });
+  });
+
+  it("keeps the good parts when one is bad, so a hand edit doesn't lose the rest", () => {
+    expect(readSavedSettings({ apiUrl: "not an address", assistantUrl: "http://127.0.0.1:11434", assistantModel: "" })).toEqual({ assistantUrl: "http://127.0.0.1:11434" });
+    expect(readSavedSettings({ apiUrl: 5, assistantModel: ["x"] })).toEqual({});
+    expect(readSavedSettings({ assistantModel: "x".repeat(201) })).toEqual({});
+  });
+
+  it("copes with a file that isn't an object, and an old file with only the server address", () => {
+    for (const data of [null, undefined, "text", 3, []]) expect(readSavedSettings(data)).toEqual({});
+    expect(readSavedSettings({ apiUrl: "https://circuits.example.com" })).toEqual({ apiUrl: "https://circuits.example.com" });
   });
 });

@@ -15,6 +15,7 @@ export default defineConfig({
     projects: [
       { extends: true, test: { name: "engine", include: ["packages/engine/test/**/*.test.ts"] } },
       { extends: true, test: { name: "netlist", include: ["packages/netlist/test/**/*.test.ts"] } },
+      { extends: true, test: { name: "assistant", include: ["packages/assistant/test/**/*.test.ts"] } },
       { extends: true, test: { name: "runner", include: ["packages/runner/test/**/*.test.ts"] } },
       { extends: true, test: { name: "api-contract", include: ["packages/api-contract/test/**/*.test.ts"] } },
       // Each API test file starts the whole app (and, for PostgreSQL, a database): give them time.

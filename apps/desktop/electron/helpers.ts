@@ -39,12 +39,66 @@ export function netlistFileFromArgs(argv: readonly string[]): string | null {
  * @throws SettingError explaining what's wrong
  */
 export function normalizeApiUrl(text: string): string {
+  return normalizeAddress(text, "http://localhost:3000");
+}
+
+/** Where Ollama listens, checked and written the same way. @throws SettingError */
+export function normalizeOllamaUrl(text: string): string {
+  return normalizeAddress(text, "http://localhost:11434");
+}
+
+/** True for an address on this computer, where nothing typed in the app leaves the machine. */
+export function isLocalAddress(address: string): boolean {
+  try {
+    const { hostname } = new URL(address);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname.endsWith(".localhost");
+  } catch {
+    return false;
+  }
+}
+
+/** What settings.json holds. Every part is optional: nothing saved means the default. */
+export interface SavedSettings {
+  /** Online mode's server. */
+  readonly apiUrl?: string;
+  /** Where Ollama listens, for the assistant. */
+  readonly assistantUrl?: string;
+  /** The Ollama model the assistant uses; without it, the first one Ollama lists. */
+  readonly assistantModel?: string;
+}
+
+/**
+ * Reads the parsed contents of settings.json. A part that is missing or can't be used is left
+ * out, so one bad entry (an old address, a hand edit) doesn't lose the others.
+ */
+export function readSavedSettings(data: unknown): SavedSettings {
+  if (typeof data !== "object" || data === null) return {};
+  const record = data as Record<string, unknown>;
+  const address = (value: unknown, normalize: (text: string) => string): string | undefined => {
+    if (typeof value !== "string") return undefined;
+    try {
+      return normalize(value);
+    } catch {
+      return undefined;
+    }
+  };
+  const apiUrl = address(record["apiUrl"], normalizeApiUrl);
+  const assistantUrl = address(record["assistantUrl"], normalizeOllamaUrl);
+  const model = record["assistantModel"];
+  return {
+    ...(apiUrl !== undefined && { apiUrl }),
+    ...(assistantUrl !== undefined && { assistantUrl }),
+    ...(typeof model === "string" && model.trim() !== "" && model.length <= 200 && { assistantModel: model.trim() }),
+  };
+}
+
+function normalizeAddress(text: string, example: string): string {
   const trimmed = text.trim();
   let url: URL;
   try {
     url = new URL(trimmed);
   } catch {
-    throw new SettingError(`“${trimmed}” isn't a web address. Write it like http://localhost:3000`);
+    throw new SettingError(`“${trimmed}” isn't a web address. Write it like ${example}`);
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new SettingError("The address must start with http:// or https://.");
   if (url.username !== "" || url.password !== "") throw new SettingError("Leave the user name and password out of the address.");

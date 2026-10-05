@@ -4,6 +4,7 @@
   "references": [
     { "path": "packages/engine" },
     { "path": "packages/netlist" },
+    { "path": "packages/assistant" },
     { "path": "packages/runner" },
     { "path": "packages/api-contract" },
     { "path": "packages/database" },

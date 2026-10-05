@@ -31,6 +31,7 @@
     "demo:http": "npm run build && node examples/dist/http-demo.js",
     "demo:auth": "npm run build && node examples/dist/auth-demo.js",
     "demo:patterns": "npm run build && node examples/dist/patterns-demo.js",
+    "eval:assistant": "npm run build && node examples/dist/assistant-eval.js",
     "demo:jobs": "npm run build && node --env-file-if-exists=.env examples/dist/jobs-demo.js",
     "db:check": "npm run build && node packages/database/dist/check-schema.js",
     "db:start": "npm run build && npm run start -w @circuitlab/database",

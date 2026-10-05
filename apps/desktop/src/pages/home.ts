@@ -100,6 +100,7 @@ function offlineCard(): HTMLElement {
       "div",
       { class: "button-row" },
       h("a", { class: "button primary", href: "#/local/new", "aria-disabled": !isDesktop }, "New circuit"),
+      h("a", { class: "button", href: "#/local/new/netlist?ask=1", "aria-disabled": !isDesktop, title: "Describe a circuit in words and let a model running on this computer draft it" }, "Ask the assistant"),
       h("a", { class: "button", href: "#/library", "aria-disabled": !isDesktop }, "Library"),
       openButton,
     ),

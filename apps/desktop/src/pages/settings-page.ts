@@ -1,5 +1,6 @@
 import type { DesktopBridge } from "../../electron/bridge";
 import { normalizeApiUrl } from "../../electron/helpers";
+import { assistantSettingsCard } from "../assistant/settings-card";
 import { signOut } from "../api";
 import { desktop, unwrap } from "../desktop";
 import { h } from "../dom";
@@ -8,7 +9,7 @@ import type { PageContext } from "../router";
 import { currentSession } from "../session";
 import { field, pageHeader, runAction, successBox } from "../ui";
 
-/** `#/settings`: online mode's server address. The main process saves it, in settings.json. */
+/** `#/settings`: online mode's server address, and the assistant's Ollama. The main process saves them, in settings.json. */
 export async function settingsPage({ root, signal }: PageContext): Promise<void> {
   const maybeBridge = desktop();
   if (maybeBridge === null) {
@@ -59,5 +60,5 @@ export async function settingsPage({ root, signal }: PageContext): Promise<void>
   });
   reset.addEventListener("click", () => void apply(null, reset));
 
-  root.append(pageHeader("Settings"), h("section", { class: "card settings-card" }, h("h2", {}, "Online mode"), form));
+  root.append(pageHeader("Settings"), h("section", { class: "card settings-card" }, h("h2", {}, "Online mode"), form), assistantSettingsCard(bridge, settings.assistant));
 }

@@ -9,11 +9,13 @@
     "demo:async": "node dist/async-demo.js",
     "demo:api": "node dist/api-demo.js",
     "demo:http": "node dist/http-demo.js",
-    "demo:jobs": "node dist/jobs-demo.js"
+    "demo:jobs": "node dist/jobs-demo.js",
+    "eval:assistant": "node dist/assistant-eval.js"
   },
   "dependencies": {
     "@circuitlab/api": "^0.1.0",
     "@circuitlab/api-contract": "^0.1.0",
+    "@circuitlab/assistant": "^0.1.0",
     "@circuitlab/engine": "^0.1.0",
     "@circuitlab/netlist": "^0.1.0",
     "@circuitlab/runner": "^0.1.0"

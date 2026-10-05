@@ -160,6 +160,29 @@ async function saveDrawing(draft: Draft, source: DocumentSource): Promise<string
   return "/local"; // straight to the circuit's page, to try it
 }
 
+/** Checks netlist text in the editor, offline. */
+async function checkLocalNetlist(text: string): Promise<string> {
+  const circuit: LocalCircuit = unwrap(await requireDesktop().parse(text));
+  return describeCheck(circuit.summary, circuit.gates.length);
+}
+
+/** `#/local/new/netlist`: a new offline circuit written as netlist text, or drafted by the assistant. */
+export function newLocalNetlistPage(context: PageContext): void {
+  if (needsDesktop(context.root)) return;
+  openNetlistEditor(context, {
+    title: "New offline circuit from a netlist",
+    text: NETLIST_TEMPLATE,
+    saveLabel: "Save",
+    cancelPath: "/library",
+    note: "Saves it in your library, inside the app.",
+    check: checkLocalNetlist,
+    async save(text) {
+      await saveOffline(text, "", { kind: "new" });
+      return "/local";
+    },
+  });
+}
+
 /** `#/local/new` */
 export function newLocalDrawingPage(context: PageContext): void {
   if (needsDesktop(context.root)) return;
@@ -215,10 +238,7 @@ export async function editLocalNetlistPage(context: PageContext): Promise<void> 
     text: openFile.text,
     saveLabel: "Save",
     cancelPath: "/local",
-    async check(text) {
-      const circuit: LocalCircuit = unwrap(await requireDesktop().parse(text));
-      return describeCheck(circuit.summary, circuit.gates.length);
-    },
+    check: checkLocalNetlist,
     async save(text) {
       await saveOffline(text, openFile.description ?? "", openFile.source);
       return "/local";

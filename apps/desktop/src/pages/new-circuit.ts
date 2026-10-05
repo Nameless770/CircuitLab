@@ -42,6 +42,7 @@ export function newCircuitPage({ root }: PageContext): void {
       { class: "mode-grid" },
       h("section", { class: "card mode-card" }, h("h2", {}, "Draw it"), h("p", {}, "Place gates and connect them with the mouse."), h("div", { class: "button-row" }, h("a", { class: "button primary", href: "#/circuits/new/draw" }, "Open the editor"))),
       h("section", { class: "card mode-card" }, h("h2", {}, "Write a netlist"), h("p", {}, "Type the circuit as text, one gate per line."), h("div", { class: "button-row" }, h("a", { class: "button", href: "#/circuits/new/netlist" }, "Open the netlist editor"))),
+      h("section", { class: "card mode-card" }, h("h2", {}, "Ask the assistant"), h("p", {}, "Describe the circuit in words, and a model running on this computer drafts it for you to check."), h("div", { class: "button-row" }, h("a", { class: "button", href: "#/circuits/new/netlist?ask=1" }, "Describe it"))),
       h("section", { class: "card mode-card" }, h("h2", {}, "Upload a netlist file"), h("p", {}, "A .net file from your computer, like the ones in examples/netlists."), h("div", { class: "button-row" }, uploadButton, upload)),
       h("section", { class: "card mode-card" }, h("h2", {}, "Start from an example"), h("p", {}, "Adds a copy of an example to your account."), h("div", { class: "button-row" }, exampleButtons)),
     ),

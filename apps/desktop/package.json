@@ -18,6 +18,7 @@
   "devDependencies": {
     "@circuitlab/api": "^0.1.0",
     "@circuitlab/api-contract": "^0.1.0",
+    "@circuitlab/assistant": "^0.1.0",
     "@circuitlab/engine": "^0.1.0",
     "@circuitlab/netlist": "^0.1.0",
     "@types/node": "^24.0.0",
