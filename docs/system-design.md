@@ -144,7 +144,7 @@ stayed at a quarter of a core. One cached result of that circuit takes 98 KB in 
 **Reasoned:** `GET /v1/circuits/{id}` loads the whole circuit and only then compares the
 `If-None-Match` ETag, although the version the ETag needs is already in the cheap access row. The
 truth-table pages do it the right way round: a client with a current copy gets its 304 without the
-circuit being read.
+circuit being read. (**Fixed** afterwards: [stage 1](#stage-1-fix-the-sharp-edges).)
 
 ### Two copies
 
@@ -200,7 +200,8 @@ costs most of the work.
 **Reasoned:** the database connection pool never gives up waiting. `pg-pool` starts a timer only
 when `connectionTimeoutMillis` is set, and `createPrismaClient` sets only the pool size, so a
 request with no free connection waits as long as it takes. A 503 mapping for "no connection in
-time" exists (`database-errors.ts`), but a wait with no limit never reaches it.
+time" exists (`database-errors.ts`), but a wait with no limit never reaches it. (**Fixed** afterwards,
+and the fix found a second problem: [stage 1](#stage-1-fix-the-sharp-edges).)
 
 ### Background jobs
 
@@ -273,8 +274,8 @@ From the evidence above, in the order that growth would hit each one:
 4. **The API's CPU.** The ordinary kind of limit: add copies (stage 2), about one per 330 requests
    a second.
 5. **Database connections,** at about 7 copies. *Needs:* a connection pooler.
-6. **The history table,** in weeks to months. *Needs:* retention at once, partitions before it is
-   big.
+6. **The history table,** in weeks to months. *Needs:* retention at once (done: stage 1), partitions
+   before it is big.
 7. **PostgreSQL's CPU,** at about 10 times the target. **Calculated:** the single-copy runs cost
    about 1.5 cores of PostgreSQL per 1,000 requests a second, so 6,000 a second would need about
    10: large, but still one machine (a straight-line extrapolation, not measured). This document
@@ -319,9 +320,25 @@ later.
 
 **Phase 13 did** the first, the second and the last of these for the demo, and tested them: the address
 limit (`AUTH_RATE_LIMIT`, in the API, along with `TRUST_PROXY`), the memory limits and the second Redis
-(in `docker-compose.prod.yml`), and a `JWT_SECRET` that the production file requires. **Still open:** the
-wait limit on the database pool, answering `If-None-Match` before loading a circuit, and the history's
-retention. See [section 9](#9-what-phase-13-did-with-this).
+(in `docker-compose.prod.yml`), and a `JWT_SECRET` that the production file requires.
+
+**The other three were done afterwards, so stage 1 is finished:**
+- **The wait limit on the database pool:** `DATABASE_POOL_TIMEOUT_MS`, default 5 seconds (0 waits for
+  ever). A request that finds no free connection in time answers 503 with `Retry-After`. Testing it
+  by making a pool run dry for real found a problem the plan had only suspected: the pool's timeout
+  isn't a Prisma error with a code but a plain `Error("timeout exceeded when trying to connect")`, so
+  the existing mapping to 503 never matched and it came out as a 500, "a bug". The mapping now knows those
+  words, and the integration test fails if a future pg-pool says it differently.
+- **`If-None-Match` before loading:** the circuit `GET` now checks access (which reads the version),
+  answers 304 from that, and only then loads the gates and wires. The 37 ms of API CPU that loading a
+  5,000-gate circuit cost is no longer spent on a request whose answer is "nothing changed". A test
+  counts the loads: one for a 200, none for a 304.
+- **Retention for the history:** `RUN_RETENTION_DAYS`, default 30 (0 keeps everything). Housekeeping
+  deletes finished simulations and jobs older than that, oldest first, 1,000 at a time and at most 50
+  batches per run (every 10 minutes), which is more than the target adds in that time. A new index on
+  `simulation_runs (created_at)` lets each batch read only the rows it deletes, which `db:check`
+  verifies. It is a plain B-tree: on a column that only grows, new rows land at its edge, so it costs
+  little to keep.
 
 **What stage 1 doesn't fix:** the API's own CPU, or anything about the database.
 
@@ -469,9 +486,8 @@ behind a reverse proxy ([deploy.md](deploy.md)). Phase 13 took the cheap parts o
   (`AUTH_RATE_LIMIT`), `TRUST_PROXY` (a forged `X-Forwarded-For` doesn't dodge the limit), a memory limit
   on Redis with the cache in a Redis of its own, and `JWT_SECRET`, `POSTGRES_PASSWORD` and `SITE_ADDRESS`
   required by `docker-compose.prod.yml`.
-- **Not done, and still stage 1:** the wait limit on the database pool, answering `If-None-Match` before
-  loading a circuit, and retention for the history. None of them blocks a demo; all of them still apply
-  to a bigger site.
+- **Done afterwards, finishing stage 1:** the wait limit on the database pool, answering `If-None-Match`
+  before loading a circuit, and retention for the history (see [stage 1](#stage-1-fix-the-sharp-edges)).
 - **Not done, stage 2 and later:** several API copies, a separate pool for `/v1/auth/*`, a readiness check
   apart from liveness, and everything in stages 3 and 4.
 

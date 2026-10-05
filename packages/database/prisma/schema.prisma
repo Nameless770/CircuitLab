@@ -170,6 +170,7 @@ model SimulationRun {
   // ('queued', 'running')) and each user's truth-table jobs (WHERE kind = 'truth_table').
   @@index([circuitId, createdAt(sort: Desc)], map: "simulation_runs_circuit_idx")
   @@index([userId, createdAt(sort: Desc)], map: "simulation_runs_user_idx")
+  @@index([createdAt], map: "simulation_runs_created_idx")
   @@map("simulation_runs")
 }
 

@@ -133,6 +133,17 @@ describe("configuration", () => {
     expect(AppConfig.fromEnvironment({ PORT: "8080", DATABASE_POOL_SIZE: "1" })).toMatchObject({ port: 8080, databasePoolSize: 1, databaseUrl: undefined });
   });
 
+  it("waits 5 seconds for a database connection and keeps a history for 30 days, unless told otherwise", () => {
+    expect(new AppConfig()).toMatchObject({ databasePoolTimeoutMs: 5_000, runRetentionDays: 30 });
+    expect(AppConfig.fromEnvironment({})).toMatchObject({ databasePoolTimeoutMs: 5_000, runRetentionDays: 30 });
+    expect(AppConfig.fromEnvironment({ DATABASE_POOL_TIMEOUT_MS: "250", RUN_RETENTION_DAYS: "7" })).toMatchObject({ databasePoolTimeoutMs: 250, runRetentionDays: 7 });
+    // 0 means "no limit" and "keep for ever".
+    expect(AppConfig.fromEnvironment({ DATABASE_POOL_TIMEOUT_MS: "0", RUN_RETENTION_DAYS: "0" })).toMatchObject({ databasePoolTimeoutMs: 0, runRetentionDays: 0 });
+    expect(() => AppConfig.fromEnvironment({ DATABASE_POOL_TIMEOUT_MS: "soon", RUN_RETENTION_DAYS: "-3" })).toThrow(
+      /DATABASE_POOL_TIMEOUT_MS must be a whole number of at least 0[\s\S]*RUN_RETENTION_DAYS must be a whole number of at least 0/,
+    );
+  });
+
   it("trusts no proxy and limits no address unless told to, and reads both settings as whole numbers", () => {
     expect(AppConfig.fromEnvironment({})).toMatchObject({ trustProxy: 0, authRateLimit: 0 });
     expect(new AppConfig()).toMatchObject({ trustProxy: 0, authRateLimit: 0 });
@@ -150,6 +161,7 @@ describe("database errors", () => {
     ["a raw query to an unreachable server", { code: "P2010", meta: { driverAdapterError: { cause: { kind: "DatabaseNotReachable" } } } }, true],
     ["the server shutting down (57P01)", { code: "P2010", meta: { driverAdapterError: { cause: { kind: "postgres", code: "57P01" } } } }, true],
     ["a connection exception (08006)", { meta: { driverAdapterError: { cause: { kind: "postgres", code: "08006" } } } }, true],
+    ["no connection came free within the wait limit (pg-pool's own words)", new Error("timeout exceeded when trying to connect"), true],
     ["a unique violation (P2002)", { code: "P2002" }, false],
     ["a syntax error (42601)", { meta: { driverAdapterError: { cause: { kind: "postgres", code: "42601" } } } }, false],
     ["anything else", new Error("boom"), false],

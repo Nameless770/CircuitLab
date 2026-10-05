@@ -164,8 +164,9 @@ skipped.
 
 Every circuit response carries `ETag: "<version>"`.
 - **`If-None-Match`** on reads answers 304 with no body when the client's copy is still current.
-  This saves bandwidth. For a truth-table page, the ETag comes from the circuit's access row alone,
-  so a 304 doesn't even load the circuit.
+  This saves bandwidth, and work: the ETag comes from the circuit's access row alone (which also
+  decides who may see it, so a stranger gets a 404, never a 304), so a 304 doesn't load the circuit's
+  gates and wires. That holds for a circuit (JSON or netlist) and for a truth-table page.
 
 **Caching (phase 10).** The server keeps simulation results and truth-table pages, keyed by the
 circuit's version: the same version that makes the ETags. A new version means new keys, so a

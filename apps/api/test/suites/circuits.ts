@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { parseNetlist } from "@circuitlab/netlist";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { CircuitsRepository } from "../../dist/circuits/circuits.repository";
 import type { Api, Person } from "../support/client";
 import { createCircuit, halfAdderBody, register, type TestContext } from "../support/server";
 
@@ -100,6 +101,51 @@ export function circuitsSuite(context: () => TestContext): void {
       const reply = await api.get(`/v1/circuits/${id}`, { as: ada, headers: { "If-None-Match": '"1"' } });
       expect(reply.status).toBe(304);
       expect(reply.text).toBe("");
+    });
+
+    it("answers a 304 from the access check alone, without loading the gates and wires", async () => {
+      const { api, app } = context();
+      const find = vi.spyOn(app.get(CircuitsRepository, { strict: false }), "find");
+      try {
+        const ada = await register(api, "Ada");
+        const id = await createCircuit(api, ada);
+        find.mockClear();
+        const full = await api.get(`/v1/circuits/${id}`, { as: ada });
+        expect([full.status, full.headers.get("etag"), find.mock.calls.length], "a 200 loads the circuit once").toEqual([200, '"1"', 1]);
+
+        find.mockClear();
+        const same = await api.get(`/v1/circuits/${id}`, { as: ada, headers: { "If-None-Match": '"1"' } });
+        expect([same.status, same.headers.get("etag"), find.mock.calls.length], "a 304 doesn't").toEqual([304, '"1"', 0]);
+
+        // The netlist form has a tag of its own, and the same rule.
+        const asNetlist = { Accept: "text/vnd.circuitlab.netlist" };
+        const netlistSame = await api.get(`/v1/circuits/${id}`, { as: ada, headers: { ...asNetlist, "If-None-Match": '"1-netlist"' } });
+        expect([netlistSame.status, netlistSame.headers.get("etag"), find.mock.calls.length]).toEqual([304, '"1-netlist"', 0]);
+        // The JSON tag doesn't vouch for the netlist, so that is sent.
+        expect((await api.get(`/v1/circuits/${id}`, { as: ada, headers: { ...asNetlist, "If-None-Match": '"1"' } })).status).toBe(200);
+      } finally {
+        find.mockRestore();
+      }
+    });
+
+    it("sends the new circuit when the client's tag is old, and leaks nothing with a tag that would match", async () => {
+      const { api } = context();
+      const ada = await register(api, "Ada");
+      const grace = await register(api, "Grace");
+      const id = await createCircuit(api, ada);
+      await api.patch(`/v1/circuits/${id}`, { as: ada, json: { name: "Renamed" }, headers: { "If-Match": '"1"' } });
+
+      const old = await api.get(`/v1/circuits/${id}`, { as: ada, headers: { "If-None-Match": '"1"' } });
+      expect([old.status, old.headers.get("etag"), old.body.name]).toEqual([200, '"2"', "Renamed"]);
+      expect((await api.get(`/v1/circuits/${id}`, { as: ada, headers: { "If-None-Match": "*" } })).status).toBe(304);
+
+      // Access is checked before the tag: a private circuit is a 404 to a stranger, never a 304 (that would confirm it exists and its version).
+      for (const asked of [{ as: grace }, {}]) {
+        const stranger = await api.get(`/v1/circuits/${id}`, { ...asked, headers: { "If-None-Match": '"2"' } });
+        expect([stranger.status, stranger.body.code]).toEqual([404, "not-found"]);
+      }
+      // And a circuit that doesn't exist is a 404 whatever tag comes with it.
+      expect((await api.get(`/v1/circuits/00000000-0000-4000-8000-000000000000`, { as: ada, headers: { "If-None-Match": "*" } })).status).toBe(404);
     });
 
     it("refuses an edit based on an old version (412) instead of overwriting someone's change", async () => {

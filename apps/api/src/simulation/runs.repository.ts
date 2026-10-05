@@ -22,4 +22,11 @@ export abstract class RunsRepository {
 
   /** A circuit's most recent runs, newest first: everyone's, or only `userId`'s. */
   abstract recent(circuitId: string, limit: number, userId?: string): Promise<readonly RunRecord[]>;
+
+  /**
+   * Retention: deletes up to `limit` runs created before `cutoff`, simulations and truth-table
+   * jobs, the oldest first, and says how many. Housekeeping repeats it until a batch comes back
+   * short. A run that is still queued or running is never deleted (queries.sql: delete_old_runs).
+   */
+  abstract deleteFinishedBefore(cutoff: Date, limit: number): Promise<number>;
 }

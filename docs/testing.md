@@ -4,7 +4,7 @@
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 996 of them in about 40 seconds. The
+That builds everything, type-checks the tests, and runs all 1,011 of them in about 40 seconds. The
 API's integration tests run twice: once with everything in memory, and once as production runs,
 on a real PostgreSQL 18 and a real Redis 8.
 
@@ -119,6 +119,20 @@ test file ([containers.ts](../apps/api/test/support/containers.ts)):
     after the limit, sign-ins and registrations counted together, a count for each address, a new count
     each minute (by moving the clock), and refreshing a token or any other request not limited.
 
+- **The scaling plan's first stage** (stage 1 of [system-design.md](system-design.md#stage-1-fix-the-sharp-edges)):
+  - **The database wait limit** ([database-failures.test.ts](../apps/api/test/database-failures.test.ts)): a
+    pool of one connection is held, and a second request gives up at its limit (300 ms) with a 503 and
+    `Retry-After`, then works again when the connection is free. Making the pool run dry for real found
+    that the timeout reaches the app as a plain `Error` that Prisma doesn't classify, so it was a 500 until
+    the error mapping learned its words.
+  - **`If-None-Match`:** a 304 loads no circuit (the repository's `find` is watched: once for a 200,
+    never for a 304, JSON or netlist); a stale tag gets the new circuit and tag; a stranger with a tag that
+    would match gets a 404, never a 304. The test fails on the old code.
+  - **Retention** (the time tests, on memory and on PostgreSQL, by moving the clock 35 days; a unit test of
+    the batching loop; `db:check` for the SQL): runs and lost jobs older than 30 days are deleted, newer
+    ones aren't, a batch deletes no more than its limit, nothing is asked at 0 days, a run still unfinished
+    is never deleted, and the oldest runs are found through `simulation_runs_created_idx`.
+
 ## Do the tests catch bugs?
 
 Coverage only says which lines ran. So, to check that the tests would notice bugs, 12 bugs were
@@ -228,8 +242,9 @@ too; see [design-patterns.md](design-patterns.md).
 ## Continuous integration
 
 [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs on every push to `main` and on every pull
-request, on fresh Ubuntu machines from GitHub. The badge at the top of the README shows the last result on
-`main`.
+request, on fresh Ubuntu 24.04 machines from GitHub (pinned, because GitHub is moving the `ubuntu-latest`
+label to 26.04 in the autumn of 2026, and a build that turns red on a day nobody changed anything is a
+confusing way to find out). The badge at the top of the README shows the last result on `main`.
 
 | Job | What it runs |
 | --- | --- |

@@ -270,6 +270,18 @@ UPDATE simulation_runs SET status = 'failed', finished_at = $1, error_code = 'in
 WHERE status IN ('queued', 'running') AND created_at < $2
 RETURNING id;
 
+-- name: delete_old_runs
+-- Housekeeping, retention (RUN_RETENTION_DAYS): deletes one batch of at most $2 runs, simulations
+-- and truth-table jobs, created before $1, the oldest first. The caller repeats it until a batch
+-- comes back short. Runs still queued or running are never deleted (fail_abandoned_jobs ends the
+-- lost ones first). Served by simulation_runs_created_idx, so a batch reads only what it deletes.
+DELETE FROM simulation_runs WHERE id IN (
+  SELECT id FROM simulation_runs
+  WHERE created_at < $1 AND status NOT IN ('queued', 'running')
+  ORDER BY created_at
+  LIMIT $2
+);
+
 -- Sharing --------------------------------------------------------------------------------------
 
 -- name: share_circuit

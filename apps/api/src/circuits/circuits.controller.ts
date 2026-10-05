@@ -66,14 +66,21 @@ export class CircuitsController {
     @Res() response: Response,
   ): Promise<void> {
     const mediaType = responseMediaType("getCircuit", header(request.headers.accept));
-    const record = await this.circuits.get(id, user);
-    const etag = circuitETag(record.version, mediaType === MEDIA_TYPES.netlist ? "netlist" : "json");
+    const form = mediaType === MEDIA_TYPES.netlist ? "netlist" : "json";
+    // Whether the client's copy is current depends on the version alone, which the access check
+    // reads anyway (and a stranger gets a 404 from it, never a 304). So a 304 doesn't load the
+    // gates and wires, which for a big circuit was most of the work (docs/system-design.md).
+    const { facts } = await this.circuits.authorize(id, user, "read");
     // The answer depends on who asks (a private circuit is 404 to strangers) as well as on Accept.
-    response.vary("Accept").vary("Authorization").set("ETag", etag);
-    if (isNotModified(header(request.headers["if-none-match"]), etag)) {
-      response.status(304).end();
+    response.vary("Accept").vary("Authorization");
+    const current = circuitETag(facts.version, form);
+    if (isNotModified(header(request.headers["if-none-match"]), current)) {
+      response.set("ETag", current).status(304).end();
       return;
     }
+    const record = await this.circuits.load(id);
+    // The tag of what is sent: the circuit may have been edited since the access check.
+    response.set("ETag", circuitETag(record.version, form));
     if (mediaType === MEDIA_TYPES.json) {
       response.json(circuitResource(record));
       return;

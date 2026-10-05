@@ -17,6 +17,17 @@ export interface AppSettings {
   /** Most open database connections. `DATABASE_POOL_SIZE`, default 10. */
   readonly databasePoolSize: number;
   /**
+   * How long a request waits for a free database connection before the API answers 503, in
+   * milliseconds. `DATABASE_POOL_TIMEOUT_MS`, default 5,000; 0 waits for ever.
+   */
+  readonly databasePoolTimeoutMs: number;
+  /**
+   * How long finished simulations and truth-table jobs stay in the history, in days; 0 keeps them
+   * for ever. `RUN_RETENTION_DAYS`, default 30. Housekeeping deletes the older ones, a batch at a
+   * time. A row is about 360 bytes, so a busy site's history otherwise grows without end.
+   */
+  readonly runRetentionDays: number;
+  /**
    * The key that signs access tokens. `JWT_SECRET`, at least 32 characters. Without it, a random
    * key is made at startup: fine for a demo, but every token dies when the API restarts, and two
    * API instances wouldn't accept each other's tokens.
@@ -74,6 +85,8 @@ export class AppConfig implements AppSettings {
   readonly shutdownGraceMs: number;
   readonly databaseUrl: string | undefined;
   readonly databasePoolSize: number;
+  readonly databasePoolTimeoutMs: number;
+  readonly runRetentionDays: number;
   readonly jwtSecret: string | undefined;
   readonly redisUrl: string | undefined;
   readonly redisCacheUrl: string | undefined;
@@ -91,6 +104,8 @@ export class AppConfig implements AppSettings {
     this.shutdownGraceMs = settings.shutdownGraceMs ?? 10_000;
     this.databaseUrl = settings.databaseUrl;
     this.databasePoolSize = settings.databasePoolSize ?? 10;
+    this.databasePoolTimeoutMs = settings.databasePoolTimeoutMs ?? 5_000;
+    this.runRetentionDays = settings.runRetentionDays ?? 30;
     this.jwtSecret = settings.jwtSecret;
     this.redisUrl = settings.redisUrl;
     this.redisCacheUrl = settings.redisCacheUrl;
@@ -147,6 +162,8 @@ export class AppConfig implements AppSettings {
       shutdownGraceMs: whole("SHUTDOWN_GRACE_MS", 0),
       databaseUrl: postgresUrl("DATABASE_URL"),
       databasePoolSize: whole("DATABASE_POOL_SIZE", 1),
+      databasePoolTimeoutMs: whole("DATABASE_POOL_TIMEOUT_MS", 0),
+      runRetentionDays: whole("RUN_RETENTION_DAYS", 0),
       jwtSecret: secret("JWT_SECRET", 32),
       redisUrl: redisUrl("REDIS_URL"),
       redisCacheUrl: redisUrl("REDIS_CACHE_URL"),

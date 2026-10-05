@@ -258,6 +258,8 @@ curl "http://localhost:3000/v1/circuits/<id>/truth-table" -H "Authorization: Bea
 | `SHUTDOWN_GRACE_MS` | 10000 | On shutdown, how long running simulations get before they are stopped |
 | `DATABASE_URL` | none | PostgreSQL connection string. Without it, circuits are kept in memory and lost when the API stops |
 | `DATABASE_POOL_SIZE` | 10 | Database connections. Must be 1 with the local dev database (`npm run db:start`) |
+| `DATABASE_POOL_TIMEOUT_MS` | 5000 | How long a request waits for a free database connection before the API answers 503 with `Retry-After`; 0 waits for ever |
+| `RUN_RETENTION_DAYS` | 30 | How long finished simulations and jobs stay in a circuit's history; 0 keeps them for ever. Housekeeping deletes the older ones |
 | `JWT_SECRET` | random | The key that signs access tokens, at least 32 characters. Without it a random key is made at startup, so a restart signs everyone out |
 | `REDIS_URL` | none | Redis connection string. Without it, the cache, the sign-in throttle, and the job queue live in the API's memory (fine for one process) |
 | `REDIS_CACHE_URL` | `REDIS_URL` | A separate Redis for the cache, which may then evict old entries (see [caching-and-jobs.md](docs/caching-and-jobs.md)) |
@@ -417,7 +419,7 @@ development.
 
 ## Testing
 
-`npm test` runs 996 tests in about 40 seconds (Docker must be running, for Redis).
+`npm test` runs 1,011 tests in about 40 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.

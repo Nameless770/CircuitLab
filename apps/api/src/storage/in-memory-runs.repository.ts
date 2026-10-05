@@ -41,6 +41,20 @@ export class InMemoryRunsRepository extends RunsRepository {
     this.runs.set(run.circuitId, list.slice(0, RUNS_KEPT_PER_CIRCUIT));
   }
 
+  async deleteFinishedBefore(cutoff: Date, limit: number): Promise<number> {
+    // The simulations are all finished: the oldest first, whichever circuit they belong to.
+    const old = [...this.runs.entries()]
+      .flatMap(([circuitId, list]) => list.filter((entry) => entry.run.createdAt < cutoff).map((entry) => ({ circuitId, entry })))
+      .sort((a, b) => a.entry.run.createdAt.getTime() - b.entry.run.createdAt.getTime())
+      .slice(0, limit);
+    for (const { circuitId, entry } of old) {
+      const list = this.runs.get(circuitId) ?? [];
+      list.splice(list.indexOf(entry), 1);
+    }
+    // Then finished jobs, which in SQL are rows of the same table.
+    return old.length + (old.length < limit ? this.jobs.deleteFinishedBefore(cutoff, limit - old.length) : 0);
+  }
+
   async recent(circuitId: string, limit: number, userId?: string): Promise<readonly RunRecord[]> {
     // Newest first, like the simulations, so equal times keep the newest first after the (stable) sort.
     const jobs = [...this.jobs.forCircuit(circuitId)].reverse().map((job) => ({ userId: job.userId, run: jobRun(job) }));

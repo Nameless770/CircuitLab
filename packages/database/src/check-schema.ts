@@ -661,6 +661,33 @@ async function jobs(): Promise<void> {
   print(`\nHousekeeping (fail_abandoned_jobs): a job queued two hours ago and never run becomes ${failedJob?.status} (${failedJob?.error_code}).`);
   const allowance = (await run<Allowance>("job_allowance", [lea, new Date(now.getTime() - DAY)])).rows[0];
   print(`Lea's allowance now: ${allowance?.started} jobs started in the last 24 hours, ${allowance?.unfinished} unfinished.`);
+
+  // Housekeeping, retention: finished runs older than the cutoff go, a batch at a time; what is
+  // unfinished, or newer, stays. Five old finished runs (three simulations, two jobs), one old run
+  // that never finished, and two recent ones.
+  const cutoff = new Date(now.getTime() - 30 * DAY);
+  const daysAgo = (days: number): Date => new Date(now.getTime() - days * DAY);
+  const finishedRun = `INSERT INTO simulation_runs (circuit_id, circuit_version, kind, status, inputs, outputs, row_offset, row_limit, created_at, started_at, finished_at)
+    VALUES ('${id}', 1, $1, 'succeeded', $2, $3, $4, $5, $6, $6, $6)`;
+  for (const [days, kind] of [[40, "simulate"], [39, "truth_table"], [38, "simulate"], [37, "truth_table"], [36, "simulate"], [29, "simulate"], [1, "truth_table"]] as const) {
+    const simulation = kind === "simulate";
+    await db.query(finishedRun, [kind, simulation ? { A: 1 } : null, simulation ? { Y: 1 } : null, simulation ? null : 0, simulation ? null : 4, daysAgo(days)]);
+  }
+  await db.query("INSERT INTO simulation_runs (circuit_id, circuit_version, kind, status, row_offset, row_limit, created_at) VALUES ($1, 1, 'truth_table', 'queued', 0, 4, $2)", [id, daysAgo(40)]);
+  const oldOnes = (): Promise<{ rows: { n: number }[] }> => db.query("SELECT count(*)::int AS n FROM simulation_runs WHERE created_at < $1", [cutoff]);
+  assert.equal((await oldOnes()).rows[0]?.n, 6, "five finished and one unfinished run are older than the cutoff");
+  const batches: number[] = [];
+  for (let batch = 0; batch < 10; batch++) {
+    const deleted = (await run("delete_old_runs", [cutoff, 2])).affectedRows ?? 0;
+    batches.push(deleted);
+    if (deleted < 2) break;
+  }
+  assert.deepEqual(batches, [2, 2, 1], "batches of two, until one comes back short");
+  const left = (await db.query<{ status: string; days: number }>("SELECT status, round(extract(epoch FROM ($1::timestamptz - created_at)) / 86400)::int AS days FROM simulation_runs WHERE created_at < $2 OR created_at >= $3 ORDER BY created_at", [now, cutoff, daysAgo(30)])).rows;
+  assert.equal(left.filter((row) => row.days > 30).length, 1, "only the unfinished old run is left among the old ones");
+  assert.equal(left.find((row) => row.days > 30)?.status, "queued", "and it is the one that never finished");
+  assert.ok(left.some((row) => row.days === 29) && left.some((row) => row.days === 1), "the recent runs are untouched");
+  print(`Retention (delete_old_runs): five old finished runs went in batches of ${batches.join(", ")}; an old run that never finished, and the recent ones, stayed.`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -796,6 +823,15 @@ async function indexes(): Promise<void> {
     new Date("2026-10-01T00:00:00Z"),
     new Date("2026-09-30T23:00:00Z"),
   ]);
+  // A batch of the retention delete. EXPLAIN ANALYZE really runs a DELETE, so it is rolled back.
+  await db.exec("BEGIN");
+  const retention = await plan(sql("delete_old_runs"), [new Date("2026-09-05T00:00:00Z"), 1000]);
+  await db.exec("ROLLBACK");
+  print(`Runs older than the retention, one batch of 1,000 (delete_old_runs)\n    ${retention.steps}  (${retention.ms.toFixed(2)} ms)`);
+  // What matters as the table grows is how the oldest rows are found: through the index. (The outer
+  // DELETE hashes the 1,000 ids against the whole table here, which at 60,000 rows is cheaper than 1,000
+  // lookups; in a table of millions PostgreSQL looks them up by primary key. That choice isn't tested.)
+  assert.match(retention.steps, /Index Scan using simulation_runs_created_idx/, "the oldest runs must be found through the index on created_at, not by sorting the whole table");
   print(`\nThe cursor reads 21 rows from the index; OFFSET reads and throws away 10,000 first (${(offset / keyset).toFixed(0)}x slower here).`);
 }
 

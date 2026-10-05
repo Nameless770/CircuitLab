@@ -75,6 +75,16 @@ export class InMemoryJobsRepository extends JobsRepository {
     return abandoned.map((job) => job.id);
   }
 
+  /** Retention: forgets up to `limit` finished jobs created before `cutoff`, the oldest first. Returns how many. */
+  deleteFinishedBefore(cutoff: Date, limit: number): number {
+    const old = [...this.jobs.values()]
+      .filter((job) => !isUnfinished(job.status) && job.createdAt < cutoff)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, limit);
+    for (const job of old) this.jobs.delete(job.id);
+    return old.length;
+  }
+
   /** A circuit's jobs, for its run history. */
   forCircuit(circuitId: string): readonly JobRecord[] {
     return [...this.jobs.values()].filter((job) => job.circuitId === circuitId);

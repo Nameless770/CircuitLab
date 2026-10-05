@@ -181,6 +181,7 @@ and wires imply, so a list page reads one table instead of thousands of gate row
 | A circuit's gates and wires, in order | The unique `(circuit_id, position)` indexes |
 | Wires by source (fan-out; deleting a gate) | `wires (circuit_id, source_key)` |
 | A circuit's or a user's recent runs | `simulation_runs (circuit_id, created_at DESC)`, `(user_id, created_at DESC)` |
+| The oldest finished runs: retention deletes them in batches (stage 1 of the scaling plan) | `simulation_runs (created_at)`: without it every batch would read the whole table, which is the one that grows without end |
 | Unfinished runs: housekeeping's lost jobs (phase 10) | A partial index `WHERE status IN ('queued', 'running')`, which stays small however long the history grows |
 | A user's jobs: their allowance, and an identical unfinished job (phase 10) | `simulation_runs (user_id, created_at DESC) WHERE kind = 'truth_table'`, partial, so a user's simulations don't fill it |
 
@@ -270,6 +271,7 @@ An applied migration is never edited; a change is a new migration. There are six
 | `20261001210000_accounts_and_sharing` | Phase 7: owners, visibility, shares, sessions, and the new list indexes |
 | `20261001230000_simulation_mode` | Phase 9: each run's `mode` (`combinational` or `sequential`, earlier runs combinational), and a CHECK that truth tables are combinational |
 | `20261001233000_truth_table_jobs` | Phase 10: one partial index, of each user's jobs |
+| `20261005120000_runs_retention_index` | Stage 1 of the scaling plan: an index on `simulation_runs (created_at)`, so that deleting the oldest finished runs in batches reads only what it deletes |
 
 The second and third came from bugs found while connecting Prisma:
 
@@ -381,7 +383,11 @@ was designed for it in phase 5, so the migration only adds an index. How the job
   was answered with 503 and, like a simulation turned away, leaves no trace.
 - **Housekeeping fails lost jobs** (`fail_abandoned_jobs`): unfinished an hour after they were
   requested. Phase 5's partial index of unfinished runs serves it, and stays small however long the
-  history grows. The same housekeeping runs `delete_expired_sessions`, which phase 7 wrote for it.
+  history grows. The same housekeeping runs `delete_expired_sessions`, which phase 7 wrote for it, and
+  `delete_old_runs`: **retention**, which deletes simulations and jobs finished more than
+  `RUN_RETENTION_DAYS` ago (30 by default), at most 1,000 at a time. It never touches a run that
+  is still queued or running, and `db:check` shows both that and that a batch uses
+  `simulation_runs_created_idx` (it fails if the planner reads the whole table instead).
 - **Indexes, measured** in `db:check` with 60,000 runs: a user's allowance reads only their jobs
   (`simulation_runs_user_jobs_idx`, under 0.1 ms), and the lost-job sweep reads only unfinished runs
   (`simulation_runs_unfinished_idx`).

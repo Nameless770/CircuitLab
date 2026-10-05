@@ -39,8 +39,17 @@ export class CircuitsService {
   /** @throws ApiError `not-found` (404) */
   async get(id: string, user: AuthUser | undefined): Promise<CircuitRecord> {
     await this.authorize(id, user, "read");
+    return this.load(id);
+  }
+
+  /**
+   * The circuit itself, for a caller that has already been through `authorize`, and has a reason to
+   * look at the access row first (a 304 needs nothing more).
+   * @throws ApiError `not-found` (404) when it was deleted in the meantime
+   */
+  async load(id: string): Promise<CircuitRecord> {
     const record = await this.repository.find(id);
-    if (record === undefined) throw notFound(id); // deleted in the meantime
+    if (record === undefined) throw notFound(id);
     return record;
   }
 

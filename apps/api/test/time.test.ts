@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { DAY, FakeClock, MINUTE } from "./support/clock";
 import { Housekeeping } from "../dist/jobs/housekeeping.service";
 import { JobsRepository } from "../dist/jobs/jobs.repository";
+import { RunsRepository } from "../dist/simulation/runs.repository";
 import { SETUPS, createCircuit, describeSetup, finishedJob, refresh, register, useServer } from "./support/server";
 
 describe.each(SETUPS.map((setup) => ({ ...setup, name: describeSetup(setup) })))("time-dependent rules ($name)", (setup) => {
@@ -134,5 +135,39 @@ describe.each(SETUPS.map((setup) => ({ ...setup, name: describeSetup(setup) })))
     clock.advance(LIMITS.sessionDays * DAY);
     expect((await housekeeping.run()).expiredSessions).toBeGreaterThanOrEqual(1);
     expect((await api.post("/v1/auth/refresh", { json: { refreshToken: ada.refreshToken } })).status).toBe(401);
+  });
+
+  it("keeps the history for 30 days and then deletes it, simulations and lost jobs alike, and keeps what is newer", async () => {
+    const { api, app } = context();
+    const ada = await register(api, "Ada");
+    const id = await createCircuit(api, ada);
+    const simulate = async (): Promise<void> => {
+      expect((await api.post(`/v1/circuits/${id}/simulate`, { as: ada, json: { inputs: { A: 1, B: 0 } } })).status).toBe(200);
+    };
+    const history = async (): Promise<{ kind: string; status: string }[]> => (await api.get(`/v1/circuits/${id}/runs?limit=50`, { as: ada })).body.items;
+
+    for (let run = 0; run < 3; run++) await simulate();
+    // A job no queue will ever run. Housekeeping fails it after an hour, and from then on it is a finished run like the others.
+    await app.get(JobsRepository, { strict: false }).create({ circuitId: id, circuitVersion: 1, userId: ada.id, offset: 0, limit: 4, createdAt: clock.now() }, () => {});
+
+    clock.advance(20 * DAY);
+    await refresh(api, ada);
+    for (let run = 0; run < 2; run++) await simulate();
+    clock.advance(15 * DAY); // the first four are 35 days old now, the last two 15
+    await refresh(api, ada);
+    expect(await history(), "nothing is deleted before housekeeping runs").toHaveLength(6);
+
+    // A batch deletes no more than its limit, whichever circuit's runs are the oldest.
+    expect(await app.get(RunsRepository, { strict: false }).deleteFinishedBefore(new Date(clock.now().getTime() - 30 * DAY), 2)).toBe(2);
+
+    const { deletedRuns } = await app.get(Housekeeping, { strict: false }).run();
+    expect(deletedRuns).toBeGreaterThanOrEqual(2); // what is left of the four, and maybe other tests' old runs
+    expect(await history()).toEqual([expect.objectContaining({ kind: "simulate", status: "succeeded" }), expect.objectContaining({ kind: "simulate", status: "succeeded" })]);
+
+    expect((await app.get(Housekeeping, { strict: false }).run()).deletedRuns, "a second run finds nothing more to delete").toBe(0);
+    clock.advance(20 * DAY); // now the last two are 35 days old as well
+    await refresh(api, ada);
+    expect((await app.get(Housekeeping, { strict: false }).run()).deletedRuns).toBeGreaterThanOrEqual(2);
+    expect(await history()).toEqual([]);
   });
 });

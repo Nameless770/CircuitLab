@@ -37,6 +37,17 @@ export class PrismaRunsRepository extends RunsRepository {
     });
   }
 
+  /** queries.sql: delete_old_runs. */
+  async deleteFinishedBefore(cutoff: Date, limit: number): Promise<number> {
+    return this.prisma.$executeRaw`
+      DELETE FROM simulation_runs WHERE id IN (
+        SELECT id FROM simulation_runs
+        WHERE created_at < ${cutoff} AND status NOT IN ('queued', 'running')
+        ORDER BY created_at
+        LIMIT ${limit}
+      )`;
+  }
+
   /** queries.sql: recent_runs, or recent_runs_by_user with `userId`. */
   async recent(circuitId: string, limit: number, userId?: string): Promise<readonly RunRecord[]> {
     if (!UUID.test(circuitId)) return [];

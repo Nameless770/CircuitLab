@@ -115,6 +115,14 @@ Each point answers something the measurements of [system-design.md](system-desig
   - **It counts addresses, not networks.** On IPv6 a client can switch addresses within its own
     block. Counting by block is the fix, and isn't done.
   - **It fails closed:** with Redis down, signing in and registering answer 503, like the throttle.
+- **A wait limit on the database: `DATABASE_POOL_TIMEOUT_MS`, 5 seconds.** A request that finds every
+  database connection busy waits at most that long, then gets a 503 with `Retry-After`. Without a limit
+  it waited for ever, and a busy database turned into a pile of waiting requests (phase 12 **measured**
+  that). Neither Compose file sets it, so the default applies; 0 would bring the waiting back.
+- **The history is kept for 30 days: `RUN_RETENTION_DAYS`.** Every simulation and truth-table job is a
+  row of about 360 bytes, so one simulation a second adds about 31 MB a day (**calculated**). Housekeeping
+  deletes what finished more than that many days ago, every 10 minutes, in batches. 0 keeps everything,
+  which is for a database with room to spare.
 
 ## Day to day
 

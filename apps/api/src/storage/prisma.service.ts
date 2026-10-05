@@ -14,7 +14,7 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
 
   constructor(config: AppConfig) {
     if (config.databaseUrl === undefined) throw new Error("PrismaService needs DATABASE_URL");
-    this.client = createPrismaClient(config.databaseUrl, { poolSize: config.databasePoolSize });
+    this.client = createPrismaClient(config.databaseUrl, { poolSize: config.databasePoolSize, connectionTimeoutMs: config.databasePoolTimeoutMs });
     const url = new URL(config.databaseUrl);
     this.location = `${url.hostname}:${url.port || "5432"}${url.pathname}`;
   }

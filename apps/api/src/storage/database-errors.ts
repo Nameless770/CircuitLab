@@ -17,8 +17,17 @@ const UNAVAILABLE_KINDS = new Set(["DatabaseNotReachable", "ConnectionClosed", "
  */
 const UNAVAILABLE_SQLSTATE = /^(08...|57P0[123])$/;
 
+/**
+ * What the connection pool (pg-pool) says when no connection came free within the wait limit
+ * (DATABASE_POOL_TIMEOUT_MS). Prisma doesn't classify it: it arrives as a plain Error with no code,
+ * so the words are all there is to go by. test/database-failures.test.ts makes a pool run dry for
+ * real, so a version of pg-pool that words it differently fails there instead of turning into 500s.
+ */
+const POOL_TIMEOUT_MESSAGE = "timeout exceeded when trying to connect";
+
 interface PrismaErrorShape {
   code?: unknown;
+  message?: unknown;
   meta?: { driverAdapterError?: { cause?: { kind?: unknown; code?: unknown } } };
 }
 
@@ -28,8 +37,9 @@ interface PrismaErrorShape {
  */
 export function isDatabaseUnavailable(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
-  const { code, meta } = error as PrismaErrorShape;
+  const { code, message, meta } = error as PrismaErrorShape;
   if (typeof code === "string" && UNAVAILABLE_CODES.has(code)) return true;
+  if (message === POOL_TIMEOUT_MESSAGE) return true;
   const cause = meta?.driverAdapterError?.cause;
   if (typeof cause?.kind === "string" && UNAVAILABLE_KINDS.has(cause.kind)) return true;
   return cause?.kind === "postgres" && typeof cause.code === "string" && UNAVAILABLE_SQLSTATE.test(cause.code);

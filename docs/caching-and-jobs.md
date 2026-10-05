@@ -193,7 +193,12 @@ processes there are:
 - it deletes expired sessions (phase 7 left this for phase 10);
 - it fails jobs still unfinished an hour after they were requested (`internal-error`). Those were
   lost: their worker's machine died and Redis lost the job too. Otherwise they would say "running"
-  forever and use up their owner's allowance.
+  forever and use up their owner's allowance;
+- it deletes the history that is older than `RUN_RETENTION_DAYS` (30 by default; 0 keeps it for ever):
+  simulations and jobs that finished, oldest first, 1,000 at a time and at most 50 batches in one run,
+  so one run never holds the database for long. That is more than the scaling plan's target adds in ten
+  minutes (about 20,000 runs), so it keeps up; what is left goes in the next run. It comes after the
+  sweep for lost jobs, so a lost job is finished, and can be deleted, in the same run.
 
 **Without Redis,** an in-process queue runs the same processor, with BullMQ's limits as its
 weaknesses: waiting jobs are lost when the process stops, only that process can work on them, and

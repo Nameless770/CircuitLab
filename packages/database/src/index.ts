@@ -18,6 +18,13 @@ export type {
 export interface DatabaseOptions {
   /** Most connections to keep open at once. Default 10. */
   readonly poolSize?: number;
+  /**
+   * How long a query waits for a free connection before it fails, in milliseconds. Default 5,000; 0
+   * waits for ever. The pool starts its timer only when this is set, so without it a request with
+   * no free connection waits as long as it takes, and a busy database turns into requests piling up
+   * instead of the quick, clear 503 that a limit gives (docs/system-design.md measured this).
+   */
+  readonly connectionTimeoutMs?: number;
 }
 
 /**
@@ -25,7 +32,8 @@ export interface DatabaseOptions {
  * one uses node-postgres (`pg`) and its connection pool.
  */
 export function createPrismaClient(url: string, options: DatabaseOptions = {}): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url, max: options.poolSize ?? 10 }) });
+  const adapter = new PrismaPg({ connectionString: url, max: options.poolSize ?? 10, connectionTimeoutMillis: options.connectionTimeoutMs ?? 5_000 });
+  return new PrismaClient({ adapter });
 }
 
 export { expectedMigrations, pendingMigrations } from "./migrations";
