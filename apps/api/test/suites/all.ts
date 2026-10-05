@@ -25,6 +25,11 @@ export function describeApi(setup: Setup): void {
       });
     });
 
+    it("answers a liveness check that asks nobody else and needs no token, even a bad one", async () => {
+      const reply = await context().api.get("/health/live", { headers: { Authorization: "Bearer not-a-token" } });
+      expect([reply.status, reply.body]).toEqual([200, { status: "ok" }]);
+    });
+
     it("answers an unknown path with a problem document", async () => {
       const reply = await context().api.get("/v1/nope");
       expect([reply.status, reply.body.code]).toEqual([404, "not-found"]);

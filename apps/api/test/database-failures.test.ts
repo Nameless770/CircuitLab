@@ -92,6 +92,9 @@ describe("losing the database while running", () => {
       expect([down.status, down.body.code, down.headers.get("retry-after")]).toEqual([503, "server-unavailable", "5"]);
       const health = await api.get("/health");
       expect([health.status, health.body.storage]).toEqual([503, { kind: "postgresql", reachable: false }]);
+      // The process is alive all the same: /health/live, the balancer's question, still says so.
+      const live = await api.get("/health/live");
+      expect([live.status, live.body]).toEqual([200, { status: "ok" }]);
 
       database = await startLocalPostgres({ port }); // a new, empty server on the same address
       await migrate(database.url);

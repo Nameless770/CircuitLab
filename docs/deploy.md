@@ -6,23 +6,31 @@ files, laid over the ones you already use: [docker-compose.prod.yml](../docker-c
 and [deploy/Caddyfile](../deploy/Caddyfile).
 
 ```
-the internet ──► Caddy (HTTPS, ports 80 and 443) ──► API ──► PostgreSQL
-                                                      │  ──► Redis: the queue, the throttle, job results
-                                                      │  ──► Redis: the result cache
-                                                   worker ──► the same
+                                        ┌─► API copies (2) ──────┐
+the internet ──► Caddy (HTTPS, 80/443) ─┤                        ├──► PostgreSQL
+                                        └─► sign-in copies (1) ──┤    Redis: the queue, the throttle, job results
+                                            only /v1/auth/*      │    Redis: the result cache
+                                                  worker ────────┘
 ```
 
-Only Caddy can be reached from outside. The API, the worker, PostgreSQL and both Redis servers live
-on Docker's private network. Open the site's address and you land on the API's documentation
+Only Caddy can be reached from outside. The API copies, the worker, PostgreSQL and both Redis servers
+live on Docker's private network. Open the site's address and you land on the API's documentation
 (Swagger UI), where anyone can register and try the API. The desktop app can use it too: Settings,
 then the server address.
+
+The API runs as several copies of one container, and Caddy shares the requests out between them
+([phase 12's stage 2](system-design.md#stage-2-several-api-copies-behind-a-load-balancer)). Two
+API copies and one for sign-ins and registrations is the default; [below](#how-many-copies) says how
+to change it.
 
 ## What you need
 
 - **A Linux machine with Docker** and Docker Compose 2.24 or later (the file uses `!reset`). A small
-  cloud server will do. **Calculated** from phase 12's measurements, the containers use about 0.6
-  to 1 GB; the first build, which runs `npm ci` and the TypeScript compiler, is hungrier still (not
-  measured). So take 2 GB or more.
+  cloud server will do. **Measured** with the default setup (two API copies and one for sign-ins), the
+  containers use about 0.6 GB at rest: an API copy about 125 MiB, a sign-in copy 130 to 160 MiB, the
+  worker 80 to 115 MiB, PostgreSQL 50 to 75 MiB. Under load they grow (simulations run in threads), and
+  the first build, which runs `npm ci` and the TypeScript compiler, is hungrier still (not measured). So
+  take 2 GB or more, and more CPUs help: each copy is one more core's worth of API.
 - **A domain name** pointing at the machine (an `A` record, and `AAAA` for IPv6). Caddy asks Let's
   Encrypt for a certificate, and Let's Encrypt must be able to reach the name. Without one you can
   run plain HTTP on the machine's address, to have a look: passwords and tokens then travel
@@ -93,6 +101,26 @@ Each point answers something the measurements of [system-design.md](system-desig
     (`trusted_proxies` in its configuration). Too high a number lets clients forge their address.
 - **Only Caddy is reachable.** The API's own port isn't published (`ports: !reset []`), so nothing
   can skip the proxy.
+- **Several copies of the API, and Caddy to share the requests out** (phase 12, stage 2). The API's own
+  CPU is the first limit, and it keeps nothing between requests, so copies add up: phase 12 **measured**
+  1.8 to 2.1 times the throughput from two. A copy that dies costs only the requests running on it.
+  - **Finding them.** Docker's DNS gives the service's name one address per copy, and Caddy asks
+    again every 2 seconds, so a copy that starts, stops or restarts is noticed by itself. The next
+    request goes to the copy with the fewest running.
+  - **Dead and full copies.** A copy that can't be reached 3 times in 10 seconds is left alone for those
+    10 seconds, and Caddy tries another copy meanwhile. A copy with 64 requests running gets no more;
+    when all are full Caddy keeps looking for 2 seconds, then answers **503 with `Retry-After: 5`**, in the
+    same problem-document form as the API's own 503s. So a flood is turned away quickly instead of
+    waiting for ever (**tested**, below).
+  - **A pool for sign-ins.** `/v1/auth/*` goes to copies of its own (`api-auth`, the same image), so that a
+    burst of logins, each a password hash, can't slow everyone else.
+  - **The copies must agree on three things:** the `JWT_SECRET` (a token signed by one is checked by
+    another), the database and Redis. All three come from the same lines of the Compose file, and
+    **tested** (below): a token, the cache, the sign-in lock and the address limit are shared.
+  - **Caddy doesn't probe the copies,** it learns from the requests it sends: Caddy's own documentation
+    says that active health checks don't run for the kind of upstream that finds copies by DNS. The API
+    has `GET /health/live` for a balancer that does probe; see
+    [phase 12](system-design.md#stage-2-several-api-copies-behind-a-load-balancer).
 - **Real secrets, or no start.** `JWT_SECRET`, `POSTGRES_PASSWORD` and `SITE_ADDRESS` are
   *required*: Compose stops with a message naming the missing one. Without a `JWT_SECRET` the API
   makes a random key at every start, so a restart signs everyone out, and a second API copy would
@@ -110,8 +138,8 @@ Each point answers something the measurements of [system-design.md](system-desig
   - **Behind a shared address,** such as a school's, many people look like one. A class of 1,000
     signing in within a minute needs `AUTH_RATE_LIMIT=1200` or more. That is 28 CPU-seconds of
     hashing (**calculated**): about 14 seconds of both CPUs of a small server, which will slow
-    everything else for that long. A limit that high protects little, so for a big class give
-    `/v1/auth/*` copies of its own (phase 12, stage 2).
+    everything else for that long. A limit that high protects little, so for a big class raise
+    `API_AUTH_COPIES`: `/v1/auth/*` has copies of its own, so the hashing can't slow the rest.
   - **It counts addresses, not networks.** On IPv6 a client can switch addresses within its own
     block. Counting by block is the fix, and isn't done.
   - **It fails closed:** with Redis down, signing in and registering answer 503, like the throttle.
@@ -133,13 +161,39 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop            
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d               # start it again
 ```
 
+`logs caddy` is the access log: a line of JSON for every request, with its status, how long it took, and
+the address of the copy that answered (`upstream`). It also holds each client's address and the path they
+asked for, so keep it only as long as you need it. Docker keeps the last 30 MB of it, no more.
+
+### How many copies
+
+Set `API_COPIES` (the API, 2 by default) and `API_AUTH_COPIES` (sign-ins and registrations, 1) in `.env`,
+then run the same `up -d`. Compose adds or removes copies and leaves the others alone, and Caddy notices
+within 2 seconds. **Measured:** going from 2 API copies to 3 took 5 seconds, and the next 60 requests were
+shared 16, 22 and 22.
+
+- **Each copy is about 125 MiB at rest and a core or more of CPU when busy** (phase 12 saw 100% to 140% of
+  a core for ordinary requests, and simulations also run in threads), so more copies than the machine has
+  cores doesn't help. Phase 12 measured about 330 requests a second per copy of a typical mix at a
+  comfortable load.
+- **Each copy opens up to 10 database connections** (`DATABASE_POOL_SIZE`), and PostgreSQL allows about 97:
+  7 API copies and 2 workers use 90. Beyond that the database needs a connection pooler, which is stage 3
+  of the plan and isn't done.
+- **1 and 1 is the smallest setup,** for a small machine. It works the same, but a copy that dies is a
+  site that is down until Docker restarts it.
+
 **Updating.** Pull the new code and rebuild. The migrations run by themselves first (running them
-again is harmless), and the API restarts, which takes a few seconds:
+again is harmless), and the copies are recreated:
 
 ```bash
 git pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+
+**Measured:** with a request every 25 ms, recreating the API copies lost none. The ones that arrived while no
+copy was ready waited about 1.5 seconds, because Caddy keeps looking for a copy for 2 seconds before giving
+up. A migration that an *old* copy can't work with (a column it doesn't know) would still break the copies
+that haven't been replaced yet; that isn't tested, so keep migrations compatible with the release before.
 
 **Backing up.** PostgreSQL holds everything that must last (accounts, circuits, history). The Redis
 data can all be rebuilt or is allowed to be lost: the cache is a cache, and job results expire after
@@ -168,8 +222,7 @@ deletes the containers *and the data*, including the certificates. Take a backup
 ## Checking it from outside
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}
-" https://demo.example.com/docs   # 200
+curl -s -o /dev/null -w "%{http_code}\n" https://demo.example.com/docs   # 200
 curl https://demo.example.com/health                                      # {"status":"ok", ...}
 ```
 
@@ -186,10 +239,39 @@ done; echo
 
 You should see about 30 `401`s and then `429`s, for a minute.
 
+To check that the copies share the work and behave as one, on any machine with Docker, there is a script
+that starts this same setup under a project name of its own (nothing of yours is touched), asks it
+questions through Caddy, and removes it again. It takes a few minutes the first time, which builds the image:
+
+```bash
+node scripts/check-copies.mjs
+```
+
+With `--keep` it leaves the stack running afterwards, for you to look at, and prints the command that removes it
+(`--remove=<its project name>`, which refuses any name the script didn't make itself).
+
 ## What was tested, and what wasn't
 
-On the development machine, with the real files and a freshly built image (Caddy on ports 18080
-and 18443, because the usual ones were taken):
+**Stage 2 (the copies),** by `scripts/check-copies.mjs`, with the real files, two API copies and two sign-in
+copies, on a laptop. It passed all 11 checks (CI runs it on every push too):
+- **Routing:** sign-ins and registrations are answered by the sign-in copies and nothing else is; 60
+  requests with a token from the sign-in pool were all answered, 30 by each API copy.
+- **The copies behave as one:** the cache (1 miss and 19 hits over both copies), the sign-in lock (5 wrong
+  guesses split 3 and 2 over the two sign-in copies lock the account), and the address limit (a 429 after
+  the 30 a minute, over both sign-in copies, while ordinary requests still work).
+- **A copy that dies:** killing an API copy during a steady stream of requests failed none of them (the
+  slowest took 12 ms; in a second try with a request every 20 ms, one request took 256 ms). The copy
+  came back, and took its share.
+- **No copy at all, and a flood:** with every API copy stopped, Caddy answers 503 as a problem document with
+  `Retry-After: 5` (after 4 to 9 seconds in three tries: Docker's DNS is slow to say a name is gone), and signing in
+  still works. With 500 users reading a 5,000-gate circuit for 8 seconds, about 700 requests were served and
+  about 1,350 turned away after 2 seconds (the slowest 2.4), none failed any other way, and a request 3
+  seconds later took 39 ms.
+- **By hand, the same day:** going from 2 to 3 API copies and back; recreating the API copies during a
+  steady stream of requests (none failed, the slowest waited 1.5 seconds); the memory of each container.
+
+**Before stage 2,** on the development machine, with the real files and a freshly built image (Caddy on
+ports 18080 and 18443, because the usual ones were taken):
 
 - **Through Caddy, over plain HTTP:** the health check; the root redirecting to the docs; the docs
   page and the contract; registering; creating a circuit; a simulation that is stored and then a
@@ -214,11 +296,20 @@ and 18443, because the usual ones were taken):
 - **A real server and a real network:** the DNS records, the provider's firewall, and what the
   machine does under real traffic.
 - **IPv6, and a proxy in front of Caddy.**
+- **Copies on several machines,** and a balancer outside this one. The copies would be the same image
+  with the same `JWT_SECRET`, `DATABASE_URL` and `REDIS_URL`, but that hasn't been tried.
+- **A real crash of a copy.** The check kills one with `docker kill`, which Docker counts as stopping it by
+  hand, so its restart policy doesn't apply (the check starts it again). A crash would be restarted.
+- **How a real provider's DNS behaves** when a whole pool of copies is gone: the 4 seconds above came from
+  a laptop's resolver.
 
 **Known shortcuts of the demo:**
 - **Registration is open to anyone** who finds the address. Phase 12's limit keeps a single address
   from making the server hash all day; it doesn't decide who may have an account.
-- **One machine:** if it goes down, so does the site (phase 12, section 6).
+- **One machine:** if it goes down, so does the site (phase 12, section 6). Several copies protect against
+  one of the processes dying, not against that.
+- **The number of copies is set by hand,** in `.env`; nothing adds one when the load goes up.
+- **No limit per address on anything but sign-ins and registrations:** Caddy has no rate limiting of its own.
 - **No monitoring or alerts:** `docker compose logs` and `/health` are all there is (phase 12,
   section 7).
 - **Backups are a command to schedule,** not something that runs by itself.

@@ -86,7 +86,8 @@ flowchart LR
     proxy["Reverse proxy<br/>(Caddy, HTTPS)"]
 
     subgraph server["Server (Docker Compose)"]
-        api["API<br/>(NestJS)"]
+        api["API copies<br/>(NestJS, 2 by default)"]
+        auth["Sign-in copies<br/>(the same program,<br/>only /v1/auth/*)"]
         worker["Worker<br/>(big truth tables)"]
         pg[("PostgreSQL<br/>accounts, circuits,<br/>run history")]
         redis[("Redis<br/>job queue, sign-in<br/>throttle, job results")]
@@ -98,17 +99,20 @@ flowchart LR
     swagger --> proxy
     tools --> proxy
     proxy --> api
+    proxy --> auth
     api --> pg
     api --> redis
     api --> cache
+    auth --> pg
+    auth --> redis
     worker --> pg
     worker --> redis
 ```
 
 The API keeps nothing between requests, so any number of copies can run side by side; the worker is
 the same program started differently. The reverse proxy exists only when the API is put online
-([docs/deploy.md](docs/deploy.md)). [docs/architecture.md](docs/architecture.md) goes further, with
-the package structure and the journey of one simulation and of one background job.
+([docs/deploy.md](docs/deploy.md)): it shares the requests out between the copies. [docs/architecture.md](docs/architecture.md)
+goes further, with the package structure and the journey of one simulation and of one background job.
 
 ## Documentation
 
@@ -144,10 +148,11 @@ apps/api/               @circuitlab/api           the NestJS app (and the worker
 apps/desktop/           @circuitlab/desktop       the desktop app: electron/ (main process), src/ (the window)
 docs/                   the design documents (see Documentation above), and docs/images/
 scripts/load/           the load, scale-out and job-timing scripts behind docs/system-design.md
+scripts/                check-copies.mjs starts the production setup with several API copies behind Caddy and checks it
 Dockerfile              the API's image (also runs the worker and the migrations)
 docker-compose.yml      PostgreSQL, Redis, the migrations, the API and a worker: `docker compose up`
-docker-compose.prod.yml laid over it to go online: HTTPS (Caddy), required secrets, memory limits
-deploy/Caddyfile        the reverse proxy's configuration
+docker-compose.prod.yml laid over it to go online: HTTPS (Caddy), several API copies, required secrets, memory limits
+deploy/Caddyfile        the reverse proxy's configuration: HTTPS, and sharing the requests out between the copies
 examples/               demos, and sample netlists in examples/netlists/
 */test/                 each package's tests (Vitest)
 ```
@@ -272,7 +277,9 @@ curl "http://localhost:3000/v1/circuits/<id>/truth-table" -H "Authorization: Bea
 `start:api` and `start:worker` read `.env` if there is one; a variable set in the shell wins. With
 `DATABASE_URL` or `REDIS_URL` set, the API refuses to start if that server is unreachable (or the
 database isn't migrated), and says which. `GET /health` shows whether the database and Redis are
-reachable (503 if not) and how busy the simulation workers are.
+reachable (503 if not) and how busy the simulation workers are. `GET /health/live` only says that the
+process answers, which is the question for a load balancer: it keeps saying 200 when Redis is down,
+while simulations still work.
 
 ### Inside the NestJS app
 
@@ -286,7 +293,7 @@ AppModule
 ├── SimulationModule   /v1/circuits/{id}/...   SimulationController -> SimulationService -> SimulationPoolService, ResultCache
 ├── JobsModule         .../truth-table/jobs    TruthTableJobsService -> JobQueue (BullMQ, or in-process without Redis);
 │                                              workers: TruthTableJobProcessor -> SimulationPoolService, JobResults
-├── HealthModule       /health
+├── HealthModule       /health, /health/live
 └── DocsModule         /docs, /openapi.json   Swagger UI on the contract; / leads there
 + ProblemFilter        every error leaves as application/problem+json, via the contract's toProblem()
 ```
@@ -419,7 +426,7 @@ development.
 
 ## Testing
 
-`npm test` runs 1,011 tests in about 40 seconds (Docker must be running, for Redis).
+`npm test` runs 1,013 tests in about 40 seconds (Docker must be running, for Redis).
 [docs/testing.md](docs/testing.md) has the details.
 - **Engine:** known circuits (adders, a multiplexer, ISCAS c17) are checked against independent
   references, and every gate type against every input combination.
@@ -463,17 +470,19 @@ development.
 ## Putting it online
 
 [docs/deploy.md](docs/deploy.md) goes from an empty Linux machine to a running site: Caddy in front for
-HTTPS, the secrets Compose insists on, memory limits for Redis, and a limit on sign-ins and
-registrations per address (each costs a password hash, which [docs/system-design.md](docs/system-design.md)
-measured). In short, once `SITE_ADDRESS`, `JWT_SECRET` and `POSTGRES_PASSWORD` are in `.env`:
+HTTPS and for sharing the requests out between two copies of the API (and a pool for sign-ins), the
+secrets Compose insists on, memory limits for Redis, and a limit on sign-ins and registrations per
+address (each costs a password hash, which [docs/system-design.md](docs/system-design.md) measured). In
+short, once `SITE_ADDRESS`, `JWT_SECRET` and `POSTGRES_PASSWORD` are in `.env`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-The files were tested locally, through Caddy, with the real stack. A real domain name with a Let's
-Encrypt certificate wasn't: that needs a public machine, and renting one is for the owner of the
-project to do.
+The files were tested locally, through Caddy, with the real stack, and `node scripts/check-copies.mjs`
+checks the copies (they behave as one, a killed one costs nobody a request, a flood is turned away with a
+503). A real domain name with a Let's Encrypt certificate wasn't tested: that needs a public machine, and
+renting one is for the owner of the project to do.
 
 ## Using the packages as libraries
 

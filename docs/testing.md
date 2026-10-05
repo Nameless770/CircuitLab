@@ -4,7 +4,7 @@
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 1,011 of them in about 40 seconds. The
+That builds everything, type-checks the tests, and runs all 1,013 of them in about 40 seconds. The
 API's integration tests run twice: once with everything in memory, and once as production runs,
 on a real PostgreSQL 18 and a real Redis 8.
 
@@ -132,6 +132,20 @@ test file ([containers.ts](../apps/api/test/support/containers.ts)):
     the batching loop; `db:check` for the SQL): runs and lost jobs older than 30 days are deleted, newer
     ones aren't, a batch deletes no more than its limit, nothing is asked at 0 days, a run still unfinished
     is never deleted, and the oldest runs are found through `simulation_runs_created_idx`.
+- **The scaling plan's second stage** (stage 2 of [system-design.md](system-design.md#stage-2-several-api-copies-behind-a-load-balancer)):
+  - **Liveness** (the shared API suite, so on memory and on PostgreSQL with Redis; and the two outage tests):
+    `GET /health/live` answers 200 and needs no token, even a bad one; and with Redis gone
+    ([redis.test.ts](../apps/api/test/redis.test.ts)) or the database gone
+    ([database-failures.test.ts](../apps/api/test/database-failures.test.ts)), `/health` says 503 and
+    `/health/live` still says 200. Those two are the point of having both: a balancer that asked
+    `/health` would drop every copy at once.
+  - **Copies, in the test process** ([processes.test.ts](../apps/api/test/processes.test.ts), from phase 10):
+    two API instances on one PostgreSQL and one Redis share the cache, the sign-in lock and the jobs.
+  - **Copies behind Caddy, in real containers** (`scripts/check-copies.mjs`, not a Vitest test, because it
+    builds an image and starts nine containers; CI runs it in the Docker job): 11 checks, listed in
+    [system-design.md](system-design.md#stage-2-several-api-copies-behind-a-load-balancer). It starts the
+    production setup under a project name of its own, on free ports, and removes it afterwards, so it can run
+    next to a stack of your own: `node scripts/check-copies.mjs`.
 
 ## Do the tests catch bugs?
 
@@ -249,7 +263,7 @@ confusing way to find out). The badge at the top of the README shows the last re
 | Job | What it runs |
 | --- | --- |
 | Tests | `npm ci` (the versions in the lockfile), `npm test`, `npm run db:check`, `npm run lint:api` |
-| Docker image and Compose files | `docker build`; `docker compose config` for the development setup and the production one; then the image is started with no database and asked for `/health`, `/docs` and `/openapi.json` |
+| Docker image and Compose files | `docker build`; `docker compose config` for the development setup and the production one; then the image is started with no database and asked for `/health`, `/docs` and `/openapi.json`; then `scripts/check-copies.mjs` starts the production setup with several API copies behind Caddy and checks it (a few minutes) |
 
 - **Docker is already on those machines,** so the tests start the same Redis and PostgreSQL containers as
   on a laptop.

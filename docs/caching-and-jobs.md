@@ -233,7 +233,7 @@ could make 5 guesses on each. Now the counts are in Redis:
 | Starting a job | 503; the job is forgotten, so it doesn't wait forever or count against the user |
 | A job's status | Works (it is in PostgreSQL), without progress or the result's link |
 | Downloading a result | 503 |
-| `GET /health` | 503, `redis: { reachable: false }` |
+| `GET /health` | 503, `redis: { reachable: false }` (`GET /health/live` still says 200: the process is fine, and simulations still work) |
 | Redis hanging (not answering) | The same 503s after 2 seconds (every command has a time limit), not a hung request |
 | Redis back | Recovered without a restart, within a few seconds |
 

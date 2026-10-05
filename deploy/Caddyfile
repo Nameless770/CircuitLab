@@ -5,6 +5,53 @@
 #                      at this machine, and ports 80 and 443 must be open to the internet.
 #   localhost          HTTPS with Caddy's own test certificate: for trying this out on a computer.
 #   http://localhost   plain HTTP, on port 80 inside the container.
+#   :80                plain HTTP, whatever name the request used (how scripts/check-copies.mjs
+#                      reaches it).
+
+# One pool of API copies, for the service that `args[0]` names. Docker's DNS gives a service one
+# address for each of its copies, and Caddy asks again every two seconds, so a copy that starts,
+# stops or is restarted is noticed without changing anything here. (A plain `api:3000` would be a
+# single upstream: Caddy would keep its connections to whichever copy the DNS happened to name.)
+# docs/system-design.md, stage 2, has the reasoning behind each setting.
+(pool) {
+	reverse_proxy {
+		dynamic a {args[0]} 3000 {
+			refresh 2s
+			versions ipv4
+		}
+
+		# The next request goes to the copy with the fewest running, not to the next in turn: a
+		# request may be a 2 ms read or a 10-second simulation, so turns would pile work up on
+		# one copy.
+		lb_policy least_conn
+
+		# A copy with 64 requests running is taken to be full and gets no more. When every copy is
+		# full, or none answers, Caddy keeps looking for 2 seconds, then answers 503 (below): a
+		# flood is turned away quickly instead of queueing for ever.
+		unhealthy_request_count 64
+		lb_try_duration 2s
+
+		# A copy that can't be reached, or doesn't answer in time, 3 times in 10 seconds is left alone
+		# for those 10 seconds. Only those failures count, never an answer: an API that says 503
+		# because Redis is down is working as designed, and counting that would take every copy out
+		# at once. (Caddy can't probe dynamic copies: it only learns from the requests it sends.
+		# GET /health/live is for a balancer that does probe.)
+		max_fails 3
+		fail_duration 10s
+
+		transport http {
+			# Inside Docker's network a connection takes a millisecond: one that takes a second
+			# is not going to happen.
+			dial_timeout 1s
+			# The API's own longest request is 10 seconds (a simulation), so 30 means "stuck".
+			response_header_timeout 30s
+			# Node closes an idle connection after 5 seconds. Closing ours first, after 4, means
+			# Caddy never sends a request down a connection that Node is closing at that instant.
+			keepalive 4s
+		}
+	}
+}
+
 {$SITE_ADDRESS} {
 	# Smaller answers: the Swagger UI script, JSON, CSV.
 	encode zstd gzip
@@ -15,8 +62,35 @@
 		-Server
 	}
 
-	# Everything goes to the API. Caddy puts the client's address in X-Forwarded-For (replacing any
-	# the client sent, since no proxy is trusted in front of Caddy), and the API, with TRUST_PROXY=1,
-	# believes exactly that one hop.
-	reverse_proxy api:3000
+	# One line of JSON per request on stdout (`docker compose logs caddy`): the status, how long it
+	# took, and which copy answered. It holds each client's address and the path they asked for,
+	# so keep it only as long as you need it.
+	log {
+		output stdout
+	}
+	log_append upstream {http.reverse_proxy.upstream.hostport}
+
+	# Sign-ins and registrations have copies of their own: each costs a password hash, and a burst of
+	# them must not take the CPUs of the copies that serve everyone else. Same image, no code change.
+	handle /v1/auth/* {
+		import pool api-auth
+	}
+
+	# Everything else. Caddy puts the client's address in X-Forwarded-For (replacing any the client
+	# sent, since no proxy is trusted in front of Caddy), and the API, with TRUST_PROXY=1, believes
+	# exactly that one hop.
+	handle {
+		import pool api
+	}
+
+	# When Caddy itself can't get an answer (every copy full, down or too slow), answer the way the
+	# API does for its own 503s: a problem document, and when to try again.
+	handle_errors {
+		@unavailable expression {err.status_code} in [502, 503, 504]
+		handle @unavailable {
+			header Content-Type application/problem+json
+			header Retry-After 5
+			respond `{"type":"/problems/server-unavailable","title":"Server unavailable","status":503,"code":"server-unavailable","detail":"The server is busy or restarting. Try again shortly."}` 503
+		}
+	}
 }

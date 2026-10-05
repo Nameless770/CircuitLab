@@ -17,7 +17,8 @@ flowchart LR
     proxy["Reverse proxy<br/>(Caddy, HTTPS)"]
 
     subgraph server["Server (Docker Compose)"]
-        api["API<br/>(NestJS)"]
+        api["API copies<br/>(NestJS, 2 by default)"]
+        auth["Sign-in copies<br/>(the same program,<br/>only /v1/auth/*)"]
         worker["Worker<br/>(big truth tables)"]
         pg[("PostgreSQL<br/>accounts, circuits,<br/>run history")]
         redis[("Redis<br/>job queue, sign-in<br/>throttle, job results")]
@@ -29,9 +30,12 @@ flowchart LR
     swagger --> proxy
     tools --> proxy
     proxy --> api
+    proxy --> auth
     api --> pg
     api --> redis
     api --> cache
+    auth --> pg
+    auth --> redis
     worker --> pg
     worker --> redis
 ```
@@ -40,7 +44,9 @@ flowchart LR
   engine and the netlist reader itself, with circuits saved on the computer
   ([desktop-app.md](desktop-app.md)).
 - **The API is one program that serves everyone.** It keeps nothing between requests, so any number of
-  copies can run side by side ([system-design.md](system-design.md)).
+  copies can run side by side ([system-design.md](system-design.md)). The production setup runs two, and
+  a third group of copies of the same program that only handles sign-ins and registrations, so that
+  password hashing can't slow everyone else down.
 - **The worker is the same program started differently.** It computes truth tables too big for one
   response, from a queue in Redis, so the API's answers never wait for them
   ([caching-and-jobs.md](caching-and-jobs.md)).
@@ -48,8 +54,9 @@ flowchart LR
   copy ([database-design.md](database-design.md)). In the development setup (`docker compose up`)
   both kinds of Redis data share one Redis; the production file gives the cache a Redis of its own,
   which may forget old entries.
-- **The reverse proxy exists only in production.** It adds HTTPS and tells the API each client's
-  address ([deploy.md](deploy.md)). Locally, clients talk to the API directly.
+- **The reverse proxy exists only in production.** It adds HTTPS, tells the API each client's address,
+  and shares the requests out between the copies, turning away what they can't take
+  ([deploy.md](deploy.md)). Locally, clients talk to the API directly.
 
 ## Which package builds on which
 

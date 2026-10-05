@@ -36,7 +36,8 @@ Every claim carries a tag, so you can tell what was observed from what was concl
    machines), [stage 2](#stage-2-several-api-copies-behind-a-load-balancer) (a load balancer and
    several copies), [stage 3](#stage-3-protect-the-database) (a connection pooler, partitioned
    history, a read replica), [stage 4](#stage-4-workers-and-results) (workers as a fleet, results
-   in object storage).
+   in object storage). Stage 1, and stage 2 for one machine, have since been done and tested; stages
+   3 and 4 haven't.
 5. **Nothing needs a rewrite,** and [section 8](#8-what-was-not-designed-and-why) lists what
    isn't worth building yet.
 
@@ -370,6 +371,89 @@ The step that adds capacity, and the cheapest big one, because the API is alread
 
 **What stage 2 doesn't fix:** connections multiply with copies, and the database is still one.
 
+**Done afterwards, for one machine, and tested.** The files are
+[`docker-compose.prod.yml`](../docker-compose.prod.yml), [`deploy/Caddyfile`](../deploy/Caddyfile) and the
+check [`scripts/check-copies.mjs`](../scripts/check-copies.mjs); [deploy.md](deploy.md) shows how to use
+them. Point by point:
+
+- **Copies of one image.** The production Compose file runs the API as `API_COPIES` containers of one
+  service (2 by default) and the sign-in pool as `API_AUTH_COPIES` containers of a second one (1). What
+  they share is written once, in `x-api-environment`: the same database, the same Redis servers, and the
+  `JWT_SECRET` that Compose insists on. **Measured:** `API_COPIES=3` and `docker compose up -d` added a
+  third copy in 5 seconds without recreating the other two, and Caddy used it at once (16, 22 and 22 of
+  the next 60 requests); going back to 2 removed one.
+- **Caddy finds the copies through Docker's DNS.** A service's name resolves to one address per copy, and
+  Caddy's `dynamic a` source asks again every 2 seconds, so a copy that starts, stops or is restarted is
+  noticed without touching Caddy. A plain `api:3000` would be a single upstream: Caddy would keep its
+  connections to whichever copy the DNS happened to name, and share nothing.
+- **Caddy learns from the requests it sends; it doesn't probe.** Its documentation says that active
+  health checks don't run for dynamic upstreams. So a copy that can't be reached, or doesn't answer in
+  time, 3 times in 10 seconds is left alone for those 10 seconds. Only such failures count, never an
+  answer: an API that says 503 because Redis is down is doing what it should, and counting that would
+  take every copy out at once, the thing this plan warned about. For a balancer that does probe (a
+  managed one, nginx, Traefik) the API has **`GET /health/live`**: the process answers, it asks nobody
+  else and needs no token. `/health` keeps meaning "can it do its whole job". **Tested:** with Redis
+  gone, or the database, `/health` answers 503 and `/health/live` answers 200.
+- **The cap and the timeouts.** A copy with 64 requests running gets no more (`unhealthy_request_count`,
+  the plan's "about 64"). When every copy is full, Caddy keeps looking for 2 seconds (`lb_try_duration`)
+  and then answers 503 with a problem document and `Retry-After: 5`, as the API does for its own 503s. A
+  connection that takes more than a second isn't coming (inside Docker's network it takes a millisecond),
+  and the API's longest request is 10 seconds (a simulation), so a copy silent for 30 is stuck. The next
+  request goes to the copy with the fewest running (`least_conn`): a request may be a 2 ms read or a
+  half-second simulation, so taking turns would pile work up on one copy.
+- **A pool for sign-ins.** `/v1/auth/*` goes to its own service, the same image, so a burst of logins
+  can't take the CPUs of the copies that serve everyone else. No code change, as the plan said.
+- **Limits per address.** Caddy has no rate limiting of its own (a plugin would need a custom build), so
+  the limit on sign-ins and registrations stays where phase 13 put it: in the API, as a counter in Redis
+  (`AUTH_RATE_LIMIT`), which is why it holds across copies. A limit on other requests per address isn't
+  done; it needs nginx, or a Caddy built with a plugin.
+
+What the check (`scripts/check-copies.mjs`) asks of the running setup, through Caddy, with 2 API copies
+and 2 sign-in copies, and what it found (**Tested** unless marked):
+
+| Check | Result |
+| --- | --- |
+| Sign-ins and registrations go to the sign-in pool; everything else to the API copies | pass: Caddy's access log names the copy that answered |
+| 60 requests, 10 at a time, with a token the sign-in pool issued | all 200, 30 on each API copy |
+| 20 simulations of one circuit | 1 miss and 19 hits, over both copies: the cache is shared |
+| 5 wrong sign-ins, 3 to one sign-in copy and 2 to the other | the right password then answers 429: the lock is shared |
+| Sign-ins from one address, over both sign-in copies, until the limit of 30 a minute is used up | a 429 with `Retry-After`, while `GET /v1/circuits` still answers 200: the limit is shared, and only sign-ins are limited |
+| An API copy killed while requests flow (one every 50 ms for 10 seconds) | none failed, the slowest took 12 ms |
+| The same, as a separate experiment with a request every 20 ms (**Measured**) | 161 requests after the kill, none failed, one took 256 ms: the one that met the dying copy |
+| No API copy at all | 503, a problem document, `Retry-After: 5`, and signing in still works. But it came after 4 to 9 seconds in three tries, not 2 (**Measured**): with no container left under the name, Docker's DNS asks the machine's resolver before saying "no such host" |
+| 500 users reading a 5,000-gate circuit for 8 seconds, far more than two copies can read | about 700 served (median 2.1 s), about 1,350 turned away with a 503 (median 2.0 s, the slowest 2.4 s); one request 3 seconds later took 39 ms |
+
+**Measured**, in an earlier try of the last row with 300 users: 812 served (p50 2.2 s, p99 4.5 s), 714
+turned away (47%) after 2.0 to 2.2 s, all of them Caddy's problem document. **Calculated:** without the
+cap, every request waits users ÷ throughput, as in [Overload](#overload): about 80 reads of that circuit
+a second came out of two copies, so 300 users would each wait about 3.7 seconds, 600 would wait 7.5, and
+so on without end. With it, nothing waits more than about 5 seconds whatever the number of users, and the
+requests that can't be served know it after 2.
+
+More things that were tried (**Measured**, on the same laptop):
+- **An update.** Recreating the API copies, as `docker compose up -d` does after an update, with a request
+  every 25 ms, three times: no request failed. The ones that arrived while no copy was ready waited 1.5
+  seconds (Caddy keeps looking for 2). Recreating the API, the sign-in pool and the worker together:
+  nothing failed, the slowest request took 2.0 seconds. **Not tested:** an update that changes the
+  database, which is the usual way for a rolling update to go wrong (a new column that an old copy
+  doesn't know), and a heavy load during the update.
+- **A killed copy stays stopped.** Docker counts `docker kill` as stopping a container by hand, so
+  `restart: unless-stopped` leaves it alone (the check starts it again). **Not tested:** a real crash,
+  which the policy does restart.
+- **Memory.** An API copy takes about 125 MiB when idle, a sign-in copy 130 to 160 MiB once it has
+  hashed some passwords, and the whole default setup (2 API copies, 1 sign-in copy, the worker,
+  PostgreSQL, both Redis servers and Caddy) about 620 MiB.
+
+**Not done in stage 2:**
+- **Several machines.** Copies on other machines would be the same image with the same `DATABASE_URL`,
+  `REDIS_URL` and `JWT_SECRET`, behind a balancer that probes `/health/live`. **Not tested.** Copies on one
+  machine protect against a process dying, not the machine.
+- **Adding copies by itself** ("add one above 60% CPU"). Today a person changes `API_COPIES`.
+- **A limit per address on requests other than sign-ins,** as above.
+- **The signals of [section 7](#7-what-to-watch).** Caddy's access log gives each request's status, how
+  long it took and which copy answered, and nothing reads it yet; there are still no metrics and no
+  request ids.
+
 ### Stage 3: protect the database
 
 - **A connection pooler (PgBouncer, transaction pooling)** between the API and PostgreSQL, so that
@@ -422,9 +506,9 @@ Starting points to adjust, not laws:
 
 | Signal | Do this when |
 | --- | --- |
-| API CPU, per copy | Above 60% for 10 minutes: add a copy |
+| API CPU, per copy | Above 60% for 10 minutes: add a copy (`API_COPIES`) |
 | p99 of an ordinary request | Above 500 ms: add copies, or look for a cost problem |
-| Logins | Above 15 a second sustained: a separate pool for `/v1/auth/*` |
+| Logins | Above 15 a second sustained: more copies for the pool for `/v1/auth/*` (`API_AUTH_COPIES`, one by default) |
 | PostgreSQL connections | Above 70% of `max_connections`: a pooler |
 | PostgreSQL CPU | Above 60% of its cores: a read replica, then a bigger machine |
 | `simulation_runs` | Above 50 GB or 100 million rows: partition (retention should come first) |
@@ -439,7 +523,7 @@ with several machines:
 
 | What dies | What users see | What recovers it |
 | --- | --- | --- |
-| One API copy | The requests in flight on it fail; the balancer stops sending it more | The balancer's liveness check; clients retry. A planned stop drains first (phase 4) |
+| One API copy | The requests running on it fail. Caddy tries another copy for any request that hadn't reached it, and leaves a copy that fails 3 times in 10 seconds alone (**Measured**: none of a steady stream failed when one was killed) | Docker restarts a copy that crashed (one killed by hand stays stopped); clients retry. A planned stop drains first (phase 4) |
 | One worker | Its job goes back to the queue after the lock expires (tested in phase 10) | Another worker |
 | Redis | Simulations work uncached, sign-in and jobs answer 503, `/health` says 503 | Redis restarting (`appendonly` keeps the data). A standby: not tested |
 | PostgreSQL | Everything that needs it answers 503 with `Retry-After: 5` | A standby promoted (a managed database). Not designed here |
@@ -488,8 +572,11 @@ behind a reverse proxy ([deploy.md](deploy.md)). Phase 13 took the cheap parts o
   required by `docker-compose.prod.yml`.
 - **Done afterwards, finishing stage 1:** the wait limit on the database pool, answering `If-None-Match`
   before loading a circuit, and retention for the history (see [stage 1](#stage-1-fix-the-sharp-edges)).
-- **Not done, stage 2 and later:** several API copies, a separate pool for `/v1/auth/*`, a readiness check
-  apart from liveness, and everything in stages 3 and 4.
+- **Done afterwards, stage 2 for one machine:** several API copies behind Caddy, a separate pool for
+  `/v1/auth/*`, a cap per copy, and a liveness check apart from `/health` (see
+  [stage 2](#stage-2-several-api-copies-behind-a-load-balancer)). The demo's Compose file now runs two API
+  copies and a sign-in copy by default.
+- **Not done:** stage 2 on several machines, and everything in stages 3 and 4.
 
 ## Known shortcuts
 
@@ -503,6 +590,7 @@ behind a reverse proxy ([deploy.md](deploy.md)). Phase 13 took the cheap parts o
 | PgBouncer, read replicas, object storage, workers on separate machines | Recommended from reading the code and documentation, not tried | Try each before adopting it |
 | The thresholds in [When to do each step](#when-to-do-each-step) | Starting points | Adjust with real signals |
 | Two runs of the main scenarios, not many | They agreed within 17% | More runs, if a decision depends on 10% |
+| The stage 2 numbers (the flood, the update, the killed copy) come from one laptop, with the clients on the host and the servers in Docker's virtual machine | They show that the settings do what they say. The check is meant to pass on any machine that has Docker, and CI runs it on every push | Repeat the flood on the target hardware before trusting 64 as the cap: it was the plan's guess, not a measured optimum |
 
 ## Running it yourself
 

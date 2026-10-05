@@ -310,8 +310,10 @@ The second and third came from bugs found while connecting Prisma:
   it: npm run db:migrate". Messages name the host, never the password.
 - **While running,** a lost database answers 503 `server-unavailable` with `Retry-After: 5`: the
   request may well work shortly, and it isn't a bug in the API. `/health` reports
-  `"storage": { "kind": "postgresql", "reachable": false }` with a 503, so a load balancer can stop
-  sending traffic. When the database comes back, the API recovers by itself.
+  `"storage": { "kind": "postgresql", "reachable": false }` with a 503: that is for people, and for
+  whatever restarts containers. A load balancer should ask `/health/live` instead, which still says 200
+  (the process is fine; [system-design.md](system-design.md#stage-2-several-api-copies-behind-a-load-balancer)
+  says why). When the database comes back, the API recovers by itself.
 - **Recording a simulation run is best effort.** If it fails, the simulation's answer is still
   returned and the failure is logged.
 

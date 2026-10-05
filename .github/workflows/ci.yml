@@ -82,3 +82,13 @@ jobs:
       - name: The container's log, if something went wrong
         if: failure()
         run: docker logs api
+      # The production setup with two copies of the API and two of the sign-in pool behind Caddy,
+      # asked what stage 2 of docs/system-design.md promises (docs/testing.md lists the checks): that
+      # the copies behave as one, that a copy dying costs nobody a request, and what Caddy answers
+      # when no copy can. It starts its own Compose project on free ports and removes it afterwards.
+      # The image was built above, so it is used as it is.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Several API copies behind Caddy
+        run: node scripts/check-copies.mjs --no-build

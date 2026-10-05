@@ -1,5 +1,8 @@
 # CircuitLab on a server. Laid over docker-compose.yml, this file:
 #   - adds Caddy, the only thing reachable from the internet: HTTPS in front of the API;
+#   - runs the API as several copies (API_COPIES, two by default), and gives sign-ins and
+#     registrations copies of their own (API_AUTH_COPIES, one by default). Caddy shares the requests
+#     out between them (deploy/Caddyfile): docs/system-design.md, stage 2;
 #   - refuses to start without real secrets (JWT_SECRET, POSTGRES_PASSWORD) and a SITE_ADDRESS;
 #   - tells the API it is behind one proxy (TRUST_PROXY) and limits sign-ins and registrations per
 #     address (AUTH_RATE_LIMIT): docs/system-design.md measured why;
@@ -11,9 +14,27 @@
 # docs/deploy.md has the steps, from an empty machine to a running site. Settings come from a .env
 # file next to this one (see .env.example).
 
+# What every copy of the API has in common. A copy keeps nothing of its own: accounts, circuits and
+# history are in PostgreSQL, and the cache, the throttle and the jobs are in Redis, so a request can go
+# to any copy. The one thing they must agree on is the key that signs the tokens.
+x-api-environment: &api-environment
+  DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/circuitlab
+  # Without a key of its own the API makes a random one at every start: everyone is signed out at
+  # each restart, and a copy would reject the tokens of another.
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env to at least 32 random characters (see .env.example)}
+  REDIS_CACHE_URL: redis://redis-cache:6379
+  # One proxy (Caddy) stands in front: believe its X-Forwarded-For, so that the throttle and the
+  # address limit see each client's own address and not Caddy's.
+  TRUST_PROXY: "1"
+  # Sign-ins and registrations one address may make in a minute (each costs a password hash). The
+  # count is in Redis, so it holds across copies. Behind a shared address, such as a school's,
+  # raise it (see docs/deploy.md).
+  AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-30}
+
 services:
   # HTTPS in front of the API. For a real domain name it gets a certificate from Let's Encrypt, and
-  # renews it. Port 80 must be open too: that is where Let's Encrypt checks you own the name.
+  # renews it. Port 80 must be open too: that is where Let's Encrypt checks you own the name. It also
+  # shares the requests out between the copies of the API.
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -32,6 +53,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      api-auth:
+        condition: service_healthy
+    # Caddy writes a line for every request (its access log). Docker keeps a container's log without
+    # limit unless told to: this keeps the last 30 MB.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   postgres:
     environment:
@@ -58,24 +88,45 @@ services:
     environment:
       DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/circuitlab
 
+  # The API: every request but sign-in and registration. Copies of one container, which Caddy finds
+  # by the service's name (Docker's DNS gives one address per copy). More or fewer: API_COPIES.
   api:
     # Only Caddy is published. The API itself isn't reachable from outside the Compose network.
     ports: !reset []
-    environment:
-      DATABASE_URL: postgresql://circuitlab:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/circuitlab
-      # Without a key of its own the API makes a random one at every start: everyone is signed out
-      # at each restart, and a second copy of the API would reject the first one's tokens.
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env to at least 32 random characters (see .env.example)}
-      REDIS_CACHE_URL: redis://redis-cache:6379
-      # One proxy (Caddy) stands in front: believe its X-Forwarded-For, so that the throttle and the
-      # address limit see each client's own address and not Caddy's.
-      TRUST_PROXY: "1"
-      # Sign-ins and registrations one address may make in a minute (each costs a password hash).
-      # Behind a shared address, such as a school's, raise it (see docs/deploy.md).
-      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-30}
+    deploy:
+      replicas: ${API_COPIES:-2}
+    environment: *api-environment
     depends_on:
       redis-cache:
         condition: service_healthy
+
+  # The same image, for sign-ins and registrations only (Caddy routes /v1/auth/* here). Each one
+  # costs a password hash, about 28 ms of a CPU: a burst of them, such as a class signing in at the
+  # start of a lab, keeps these copies busy and can't slow the ones that serve everyone else.
+  api-auth:
+    build: .
+    image: circuitlab
+    deploy:
+      replicas: ${API_AUTH_COPIES:-1}
+    environment:
+      <<: *api-environment
+      REDIS_URL: redis://redis:6379
+      JOB_CONCURRENCY: "0"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    healthcheck:
+      # The same as the API's in docker-compose.yml: /health, which asks the database and Redis too.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
 
   worker:
     environment:

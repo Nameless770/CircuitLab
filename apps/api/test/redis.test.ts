@@ -107,6 +107,9 @@ describe("losing Redis while running", () => {
     expect([job.status, job.body.detail]).toEqual([503, "Redis is unavailable. Try again shortly."]);
     const health = await api.get("/health");
     expect([health.status, health.body.status, health.body.redis]).toEqual([503, "unavailable", { kind: "redis", reachable: false }]);
+    // ...but the process itself is fine, and says so: a balancer that asked /health/live keeps sending it requests.
+    const live = await api.get("/health/live");
+    expect([live.status, live.body]).toEqual([200, { status: "ok" }]);
     // The job that couldn't be queued leaves no trace: it isn't waiting forever, nor using up Ada's allowance.
     const runs = await api.get(`/v1/circuits/${id}/runs`, { as: ada });
     expect(runs.body.items.filter((run: { kind: string }) => run.kind === "truth_table").map((run: { id: string }) => run.id)).toEqual([before.body.id]);
