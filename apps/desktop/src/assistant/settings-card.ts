@@ -2,6 +2,7 @@ import type { AssistantSettings, AssistantStatus, DesktopBridge } from "../../el
 import { normalizeOllamaUrl } from "../../electron/helpers";
 import { unwrap } from "../desktop";
 import { h } from "../dom";
+import { checkAssistant } from "../shell/status";
 import { errorBox, field, loading, runAction, successBox } from "../ui";
 
 /**
@@ -11,28 +12,29 @@ import { errorBox, field, loading, runAction, successBox } from "../ui";
 export function assistantSettingsCard(bridge: DesktopBridge, initial: AssistantSettings): HTMLElement {
   let settings = initial;
 
-  const address = h("input", { type: "url", value: settings.url, required: true, spellcheck: "false", placeholder: settings.defaultUrl });
-  const save = h("button", { type: "submit", class: "primary" }, "Save address");
-  const reset = h("button", { type: "button" }, "Use Ollama's default");
-  const model = h("select", { "aria-label": "Model" });
+  const address = h("input", { type: "url", class: "input lg", value: settings.url, required: true, spellcheck: "false", placeholder: settings.defaultUrl });
+  const save = h("button", { type: "submit", class: "btn lg primary" }, "Save address");
+  const reset = h("button", { type: "button", class: "btn lg" }, "Use Ollama's default");
+  const model = h("select", { class: "input lg", "aria-label": "Model" });
   const status = h("div");
   const message = h("div");
 
-  /** Asks Ollama what it has, and shows it. */
+  /** Asks Ollama what it has, and shows it (the sidebar's assistant card too). */
   async function refresh(): Promise<void> {
     status.replaceChildren(loading("Asking Ollama…"));
     show(await bridge.assistantStatus());
+    void checkAssistant();
   }
 
   function show(found: AssistantStatus): void {
     fillModels(found);
     if (found.models.length === 0) {
-      status.replaceChildren(h("p", { class: "alert alert-warning" }, found.problem ?? "Ollama has no models."));
+      status.replaceChildren(h("p", { class: "alert warn" }, found.problem ?? "Ollama has no models."));
       return;
     }
     status.replaceChildren(
       successBox(`Ollama answers at ${found.url}${found.local ? ", on this computer" : " (not this computer: what you ask the assistant is sent there)"}. ${found.models.length === 1 ? "It has 1 model." : `It has ${found.models.length} models.`}`),
-      ...(found.problem === undefined ? [] : [h("p", { class: "alert alert-warning" }, found.problem)]),
+      ...(found.problem === undefined ? [] : [h("p", { class: "alert warn" }, found.problem)]),
     );
   }
 
@@ -67,6 +69,7 @@ export function assistantSettingsCard(bridge: DesktopBridge, initial: AssistantS
       try {
         settings = unwrap(await bridge.setAssistant({ model: model.value === "" ? null : model.value })).assistant;
         message.replaceChildren(successBox(settings.savedModel === null ? "Saved. The assistant uses the newest model." : `Saved. The assistant uses ${settings.savedModel}.`));
+        void checkAssistant();
       } catch (error) {
         message.replaceChildren(errorBox(error));
       }
@@ -77,7 +80,7 @@ export function assistantSettingsCard(bridge: DesktopBridge, initial: AssistantS
     "form",
     { class: "form" },
     field("Ollama address", address, `Where Ollama listens. The default, ${settings.defaultUrl}, is Ollama on this computer.`),
-    settings.fromEnvironment ? h("p", { class: "alert alert-info" }, "CIRCUITLAB_OLLAMA_URL is set, so this run uses its address whatever is saved here.") : null,
+    settings.fromEnvironment ? h("p", { class: "alert" }, "CIRCUITLAB_OLLAMA_URL is set, so this run uses its address whatever is saved here.") : null,
     h("div", { class: "form-actions" }, save, reset),
   );
   form.addEventListener("submit", (event) => {
@@ -86,18 +89,18 @@ export function assistantSettingsCard(bridge: DesktopBridge, initial: AssistantS
   });
   reset.addEventListener("click", () => void applyAddress(null, reset));
 
-  const recheck = h("button", { type: "button" }, "Check again");
+  const recheck = h("button", { type: "button", class: "btn lg" }, "Check again");
   recheck.addEventListener("click", () => void refresh());
 
   void refresh();
   return h(
     "section",
-    { class: "card settings-card" },
+    { class: "settings-card" },
     h("h2", {}, "Assistant"),
     h(
       "p",
-      { class: "muted" },
-      "The assistant drafts circuits from a description, using a language model that runs in Ollama (ollama.com). It works in the netlist editor, online and offline. The model runs on your computer and the requests go to the address below; nothing goes to CircuitLab's server.",
+      {},
+      "The assistant drafts circuits from a description, using a language model that runs in Ollama (ollama.com). The model runs on your computer and the requests go to the address below; nothing goes to CircuitLab's server.",
     ),
     form,
     h("div", { class: "form" }, field("Model", model, "Any model you have downloaded in Ollama. A bigger one makes fewer mistakes, and is slower."), h("div", { class: "form-actions" }, recheck)),

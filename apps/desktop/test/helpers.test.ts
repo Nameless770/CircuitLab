@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SettingError, isLocalAddress, netlistFileFromArgs, normalizeApiUrl, normalizeOllamaUrl, readSavedSettings } from "../electron/helpers";
+import styles from "../src/styles.css?raw";
+import { SettingError, isLocalAddress, netlistFileFromArgs, normalizeApiUrl, normalizeOllamaUrl, readSavedSettings, windowColors } from "../electron/helpers";
 
 describe("netlistFileFromArgs", () => {
   it("finds the .net file Windows passes when a file is double-clicked", () => {
@@ -80,5 +81,26 @@ describe("readSavedSettings", () => {
   it("copes with a file that isn't an object, and an old file with only the server address", () => {
     for (const data of [null, undefined, "text", 3, []]) expect(readSavedSettings(data)).toEqual({});
     expect(readSavedSettings({ apiUrl: "https://circuits.example.com" })).toEqual({ apiUrl: "https://circuits.example.com" });
+  });
+
+  it("reads the window's theme, and ignores one it doesn't know", () => {
+    expect(readSavedSettings({ theme: "light" })).toEqual({ theme: "light" });
+    expect(readSavedSettings({ theme: "dark", apiUrl: "http://localhost:3000" })).toEqual({ theme: "dark", apiUrl: "http://localhost:3000" });
+    for (const theme of ["blue", "LIGHT", 1, null]) expect(readSavedSettings({ theme })).toEqual({});
+  });
+});
+
+describe("windowColors", () => {
+  /** The value of a colour token (--bg, ...) in the block of styles.css that starts with `selector`. */
+  function token(selector: string, name: string): string | undefined {
+    const block = styles.slice(styles.indexOf(selector), styles.indexOf("}", styles.indexOf(selector)));
+    return new RegExp(`--${name}:\\s*(#[0-9a-f]{6});`).exec(block)?.[1];
+  }
+
+  it("paints the frame in the same colours as the page's title bar, in both themes", () => {
+    for (const theme of ["dark", "light"] as const) {
+      const selector = `[data-theme="${theme}"] {`;
+      expect(windowColors(theme), theme).toEqual({ background: token(selector, "bg"), titleBar: token(selector, "panel"), symbols: token(selector, "muted") });
+    }
   });
 });

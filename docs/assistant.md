@@ -1,6 +1,6 @@
 # The assistant
 
-A panel in the desktop app's netlist editor. You describe a circuit in words ("a 2-to-1 multiplexer
+A panel in the desktop app (Ctrl+J). You describe a circuit in words ("a 2-to-1 multiplexer
 with inputs D0, D1 and SEL"), and a language model drafts it. The model runs in
 [Ollama](https://ollama.com) **on your own computer**: nothing you write goes to a cloud service or to
 CircuitLab's server.
@@ -10,28 +10,29 @@ anything in your circuit by itself: it checks the draft, shows how it behaves (i
 waits for you to press "Use this in the editor".
 
 <p align="center">
-  <img src="images/assistant.png" alt="The assistant panel in the netlist editor: a request for a full adder, and the draft the model made, with its truth table, its netlist, and the button that puts it in the editor" width="720">
+  <img src="images/assistant.png" alt="The assistant's panel over the app: a request for a full adder, and the draft the model made, with a drawing, its truth table, and the button that puts it in the workspace" width="720">
 </p>
 
 ```bash
-npm run dev:desktop                          # the app; the assistant is in every netlist editor
+npm run dev:desktop                          # the app; Ctrl+J opens the assistant
 npm run eval:assistant                       # how good is the model you have? (needs Ollama running)
 npm run eval:assistant -- llama3.2:3b        # the same, for one model by name
 ```
 
-You find it in three places, all the same panel: **Home > Offline > Ask the assistant**, **New circuit
-(online) > Describe it**, and in any **netlist editor**. It works offline and online, since it only
-fills in the editor.
+It's one panel that slides in over any screen: press **Ctrl+J**, click **Ask the assistant** at the
+bottom of the sidebar or on the home screen, or choose **More > Ask the assistant to change it** on
+an open circuit. It works offline and online, since it only fills in the workspace.
 
 ## What it does
 
-1. You write a request, and choose *a new circuit* or *change the netlist below*.
+1. You write a request, and choose *a new circuit* or *change the open circuit*.
 2. The app asks the model, checks the answer, and (if the answer has mistakes it can find) asks again,
    up to three times. This takes about a second with a GPU.
-3. You see a **draft**: the model's one-sentence idea, the gates and inputs and outputs, the whole truth
-   table (up to 4 inputs), and the netlist.
-4. **Use this in the editor** puts the netlist in the editor (with **Undo**); then **Check** and save as
-   usual. **Discard** throws it away.
+3. You see a **draft**: the model's one-sentence idea, the gates and inputs and outputs, a drawing, the
+   whole truth table (up to 4 inputs), and the netlist.
+4. **Use this in the editor** opens it in the workspace, not saved yet; **Use this in the open circuit**
+   replaces the open circuit with it (with **Undo**). Then check it and save as usual. **Discard** throws
+   it away.
 
 If Ollama isn't running, the panel says so and how to fix it; if the model can't do it, it says that
 too, with the model's own words.
@@ -40,7 +41,7 @@ too, with the model's own words.
 
 ```
 ┌── the window ──────────────────────────┐
-│ src/assistant/panel.ts                 │   asks, shows the draft, puts it in the editor
+│ src/assistant/drawer.ts                │   asks, shows the draft, puts it in the workspace
 │ src/assistant/settings-card.ts         │   Ollama's address, the model
 └────────────┬───────────────────────────┘
              │ window.circuitlab.askAssistant(...)   (the bridge: electron/bridge.ts)
@@ -127,7 +128,7 @@ check rejected correct formulas. A check is only as good as what it checks again
    those sentences, up to three answers in all. Only the latest answer goes back, so a conversation
    can't grow past the model's memory.
 
-**Changing a circuit** shows the model the circuit in its own format: the netlist in the editor is
+**Changing a circuit** shows the model the circuit in its own format: the open circuit's netlist is
 turned back into names and formulas ([describe.ts](../packages/assistant/src/describe.ts), tested by
 describing and rebuilding 33 circuits, random ones included, and comparing their behaviour), and the model
 answers with the complete new circuit. Gate names inside the circuit aren't kept, because only what the
@@ -172,8 +173,8 @@ What to take from it, honestly:
 - **The model is untrusted, and has no powers.** It can only return text. The app uses that text as a
   *formula*, which it reads with its own parser (never `eval`), builds a netlist from, and reads back with
   the netlist parser. Nothing the model writes is run, opened, or shown as HTML.
-- **Nothing reaches the circuit without you.** The draft goes into the editor only when you press "Use
-  this", and the editor's own Check and Save still apply (Undo restores what was there).
+- **Nothing reaches the circuit without you.** The draft goes into the workspace only when you press
+  "Use this", unsaved, and the workspace's own Check and Save still apply (Undo restores what was there).
 - **It stays on your computer** when Ollama does: the panel says "on this computer: what you write here
   doesn't leave it". If you point it at another address, the panel says "which is not this computer:
   what you write here is sent there", instead.

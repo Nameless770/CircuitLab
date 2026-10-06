@@ -35,6 +35,7 @@ const bridge: DesktopBridge = {
   onAssistantProgress: (listener) => {
     ipcRenderer.on("circuitlab:assistant-progress", (_event, progress: AssistantProgress) => listener(progress));
   },
+  setWindowTheme: (theme) => ipcRenderer.invoke("circuitlab:set-window-theme", theme),
 };
 
 contextBridge.exposeInMainWorld("circuitlab", bridge);

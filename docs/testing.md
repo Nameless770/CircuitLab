@@ -4,7 +4,7 @@
 npm test
 ```
 
-That builds everything, type-checks the tests, and runs all 1,013 of them in about 40 seconds. The
+That builds everything, type-checks the tests, and runs all 1,032 of them in about 40 seconds. The
 API's integration tests run twice: once with everything in memory, and once as production runs,
 on a real PostgreSQL 18 and a real Redis 8.
 
@@ -52,10 +52,10 @@ version (412) instead of overwriting someone's change"), so a failure says which
 | engine | 148 | Every gate type for every input combination (2 to 5 inputs, and 64-input gates on chosen vectors); known circuits against independent references; validation issues and their locations; sorting and cycles; simulation inputs; truth tables up to 2^53 rows; errors crossing JSON. Phase 9: the gate registry and factory; both simulation strategies (latches, flip-flops, a divide-by-two counter, oscillators, state checks); Tarjan's components against brute-force reachability |
 | netlist | 20 | Reading, writing, and round trips; streamed input split at every possible byte (inside multi-byte characters too); every mistake in `broken.net` at its line; line-length and gate limits; gzip; cancellation |
 | assistant | 189 | The formulas the model writes (what they mean, and what is refused as unclear); the truth-table minimizer (all 256 tables of up to 3 inputs, random ones up to 8); circuits built from formulas, compared row by row with ordinary code through the real engine (adders, multiplexer, decoder, comparator, parity, an 8-input table needing over 64 products, a latch that remembers); every recipe in the prompt, against its own reference and the checks that every answer goes through; describing a circuit and building it again, for 33 circuits; the retry loop with a scripted model (what is sent back, three answers at most, a refusal isn't retried); the Ollama client against a fake web server, for every way it can fail |
-| desktop | 78 | The layout and editing rules, offline simulation, settings (read back one part at a time), and the assistant's part: which model is used, what the window is shown for a draft |
+| desktop | 97 | The layout and editing rules, offline simulation, settings (read back one part at a time), and the assistant's part: which model is used, what the window is shown for a draft. Since the redesign: the window's own loop finder and netlist writer against the engine's and the netlist package's answers, and the window frame's colours against the stylesheet's |
 | runner | 10 | Worker threads give the engine's exact answers and errors; overload (503 material), cancellation, time-outs, closing; a task that runs out of memory crashes only its own worker; sequential steps with state crossing the thread; phase 10's compact pages |
 | api-contract | 97 | `openapi.yaml` and the code agree on every limit, code, and mode; request validation; RFC 9457 problems; cursor paging (no skips or repeats while circuits are added); ETags; content negotiation; phase 10's job limits and job resource |
-| api | 434 | The whole API over HTTP, all in memory (175) and on PostgreSQL and Redis (175); the time rules with an injected clock, on both (16); the app's smaller parts directly (55); database failures (3); Redis failures and settings (5); several processes sharing PostgreSQL and Redis (5) |
+| api | 471 | The whole API over HTTP, all in memory (181) and on PostgreSQL and Redis (181); the time rules with an injected clock, on both (18); the app's smaller parts directly (64); the limit on sign-ins per address (13); database failures (4); Redis failures and settings (5); several processes sharing PostgreSQL and Redis (5) |
 
 **Known circuits, checked against independent references.** The half adder against its truth table;
 the full adder against `S + 2·Cout = A + B + Cin`; a 6-bit ripple-carry adder for all 8,192

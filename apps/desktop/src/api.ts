@@ -215,11 +215,13 @@ export interface ListCircuitsOptions {
   readonly search?: string;
   /** From the previous page's `page.nextCursor`. */
   readonly cursor?: string;
+  /** Circuits per page (the API allows up to 100); 20 when left out. */
+  readonly limit?: number;
   readonly signal?: AbortSignal;
 }
 
 export function listCircuits(options: ListCircuitsOptions): Promise<CircuitPage> {
-  const params = new URLSearchParams({ scope: options.scope, limit: "20", sort: "-updatedAt" });
+  const params = new URLSearchParams({ scope: options.scope, limit: String(options.limit ?? 20), sort: "-updatedAt" });
   if (options.search !== undefined && options.search !== "") params.set("q", options.search);
   if (options.cursor !== undefined) params.set("cursor", options.cursor);
   return json<CircuitPage>(`/v1/circuits?${params.toString()}`, { signal: options.signal });

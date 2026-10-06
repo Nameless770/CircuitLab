@@ -1,6 +1,6 @@
 import type { Bit, Gate, GateType, Wire } from "@circuitlab/engine";
 import { s } from "../dom";
-import { PIN_LENGTH, add, gateSize, inputPinPoint, outputPinPoint, type Point } from "./geometry";
+import { PIN_LENGTH, PIN_RANGE, add, gateSize, inputPinPoint, outputPinPoint, type Point } from "./geometry";
 
 /**
  * Draws a circuit as SVG: standard logic-gate symbols, wires as curves, and (after a simulation)
@@ -33,6 +33,14 @@ export interface DiagramView {
   /** The drawing is at least this big (the editor wants room to add gates). */
   readonly minWidth?: number;
   readonly minHeight?: number;
+  /** Shown at this scale: 1 is one drawing unit per pixel. */
+  readonly zoom?: number;
+  /** Fills its box (width and height 100%), the gates centred: for thumbnails and the home screen. */
+  readonly fit?: boolean;
+  /** A small preview: no gate names, no tooltips, nothing to click. */
+  readonly thumb?: boolean;
+  /** Little dashes run along the wires that carry a 1, in the direction the signal flows. */
+  readonly flow?: boolean;
 }
 
 export function drawDiagram(svg: SVGSVGElement, model: DiagramModel, view: DiagramView = {}): void {
@@ -55,10 +63,11 @@ export function drawDiagram(svg: SVGSVGElement, model: DiagramModel, view: Diagr
       s(
         "g",
         { class: classes.join(" ").trim(), "data-wire": index },
-        s("title", {}, `${wire.from} → ${wire.to} (pin ${wire.toPin})`),
+        view.thumb === true ? null : s("title", {}, `${wire.from} → ${wire.to} (pin ${wire.toPin})`),
         // A wide invisible copy of the line, so a thin wire is still easy to click.
-        s("path", { d: path, class: "wire-hit" }),
+        view.thumb === true ? null : s("path", { d: path, class: "wire-hit" }),
         s("path", { d: path, class: "wire-line" }),
+        value === 1 && view.flow === true ? s("path", { d: path, class: "wire-flow" }) : null,
       ),
     );
   });
@@ -66,6 +75,8 @@ export function drawDiagram(svg: SVGSVGElement, model: DiagramModel, view: Diagr
   const gateLayer = s("g", { class: "gates" });
   let right = view.minWidth ?? 0;
   let bottom = view.minHeight ?? 0;
+  let left = Infinity;
+  let top = Infinity;
   for (const gate of model.gates) {
     const at = positionOf(gate.id);
     const pins = pinsOf(gate.id);
@@ -73,14 +84,39 @@ export function drawDiagram(svg: SVGSVGElement, model: DiagramModel, view: Diagr
     const { width, height } = gateSize(gate.type, pins);
     right = Math.max(right, at.x + width + PIN_LENGTH + 60);
     bottom = Math.max(bottom, at.y + height + 50);
+    left = Math.min(left, at.x - PIN_LENGTH - 12);
+    top = Math.min(top, at.y - 8);
   }
 
   // The editor draws its "wire being dragged" in this layer.
   const overlay = s("g", { class: "overlay" });
   svg.replaceChildren(wireLayer, gateLayer, overlay);
-  svg.setAttribute("width", String(Math.ceil(right)));
-  svg.setAttribute("height", String(Math.ceil(bottom)));
+  if (view.fit === true) {
+    // Just the gates, scaled to fill the box: the margins the editor keeps are left out.
+    if (!Number.isFinite(left)) [left, top] = [0, 0];
+    svg.setAttribute("viewBox", `${left} ${top} ${Math.max(40, right - 40 - left)} ${Math.max(40, bottom - 22 - top)}`);
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    return;
+  }
+  const zoom = view.zoom ?? 1;
+  svg.setAttribute("width", String(Math.ceil(right * zoom)));
+  svg.setAttribute("height", String(Math.ceil(bottom * zoom)));
   svg.setAttribute("viewBox", `0 0 ${Math.ceil(right)} ${Math.ceil(bottom)}`);
+}
+
+/** The size of the drawing at zoom 1, to fit it to a window. */
+export function drawingSize(model: DiagramModel): { readonly width: number; readonly height: number } {
+  let width = 240;
+  let height = 160;
+  for (const gate of model.gates) {
+    const at = model.positions.get(gate.id) ?? { x: 0, y: 0 };
+    const size = gateSize(gate.type, model.pins.get(gate.id) ?? 0);
+    width = Math.max(width, at.x + size.width + PIN_LENGTH + 60);
+    height = Math.max(height, at.y + size.height + 50);
+  }
+  return { width, height };
 }
 
 /** A smooth curve leaving the output pin to the right and arriving at the input pin from the left. */
@@ -106,7 +142,7 @@ function drawGate(gate: Gate, pins: number, at: Point, view: DiagramView): SVGGE
     "data-gate": gate.id,
     "data-type": gate.type,
   });
-  group.append(s("title", {}, describeGate(gate)));
+  if (view.thumb !== true) group.append(s("title", {}, describeGate(gate)));
 
   for (let index = 0; index < pins; index++) {
     const pin = inputPinPoint(gate.type, pins, index);
@@ -120,7 +156,7 @@ function drawGate(gate: Gate, pins: number, at: Point, view: DiagramView): SVGGE
   }
 
   group.append(...gateBody(gate, width, height, value));
-  group.append(s("text", { x: width / 2, y: height + 15, class: "gate-name" }, shorten(gate.id)));
+  if (view.thumb !== true) group.append(s("text", { x: width / 2, y: height + 15, class: "gate-name" }, shorten(gate.id)));
   return group;
 }
 
@@ -192,6 +228,21 @@ function bodyLeftEdge(type: GateType, width: number, height: number, y: number):
     return (type === "XOR" || type === "XNOR" ? -6 : 0) + 0.5 * w * t * (1 - t);
   }
   return 0;
+}
+
+/** A small symbol of a gate type, for the buttons that add gates (the same shapes as the drawing). */
+export function gateIcon(type: GateType): SVGSVGElement {
+  const pins = PIN_RANGE[type].min;
+  const { width, height } = gateSize(type, Math.max(pins, 2));
+  const parts: SVGElement[] = [];
+  for (let index = 0; index < pins; index++) {
+    const pin = inputPinPoint(type, pins, index);
+    parts.push(s("line", { x1: pin.x, y1: pin.y, x2: bodyLeftEdge(type, width, height, pin.y), y2: pin.y, class: "pin-line" }));
+  }
+  if (type !== "OUTPUT") parts.push(s("line", { x1: width, y1: height / 2, x2: width + PIN_LENGTH, y2: height / 2, class: "pin-line" }));
+  const sample: Gate = type === "CONST" ? { id: "c", type, value: 1 } : ({ id: "g", type } as Gate);
+  for (const shape of type === "INPUT" || type === "OUTPUT" || type === "CONST" ? gateBody(sample, width, height, undefined).slice(0, 1) : logicGateBody(type, width, height)) parts.push(shape);
+  return s("svg", { class: "gate-icon", viewBox: `${-PIN_LENGTH - 8} -6 ${width + PIN_LENGTH * 2 + 16} ${height + 12}`, width: 34, height: 22, "aria-hidden": "true" }, ...parts);
 }
 
 export function describeGate(gate: Gate): string {

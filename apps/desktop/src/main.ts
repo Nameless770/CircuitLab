@@ -1,84 +1,98 @@
+// The fonts of the design, inside the app so they work offline (latin and others, loaded as needed).
+import "@fontsource-variable/manrope";
+import "@fontsource-variable/geist-mono/wght.css";
 import "./styles.css";
+import { openAssistant } from "./assistant/drawer";
 import { desktop } from "./desktop";
 import { h } from "./dom";
-import { startHeader } from "./header";
-import { openPath, openWithDialog } from "./offline/document";
-import { registerPage, signInPage } from "./pages/account";
-import { circuitListPage } from "./pages/circuit-list";
-import { circuitPage } from "./pages/circuit-page";
-import {
-  editDrawingPage,
-  editLocalDrawingPage,
-  editLocalNetlistPage,
-  editNetlistPage,
-  newDrawingPage,
-  newLocalDrawingPage,
-  newLocalNetlistPage,
-  newNetlistPage,
-} from "./pages/edit-pages";
 import { homePage } from "./pages/home";
-import { libraryPage, openLibraryItemPage } from "./pages/library-page";
-import { localPage } from "./pages/local-page";
-import { newCircuitPage } from "./pages/new-circuit";
+import { libraryPage, serverListPage } from "./pages/lists";
 import { settingsPage } from "./pages/settings-page";
-import { currentPath, navigate, reload, route, setNotFoundPage, startRouter } from "./router";
+import { navigate, route, setNotFoundPage, startRouter, type PageContext } from "./router";
+import { goHome, goLibrary, goSettings, goTo, newCircuit, openNetlistFile, sidebarHidden } from "./shell/commands";
+import { startKeys } from "./shell/keys";
+import { startSidebar } from "./shell/sidebar";
+import { openSignIn, type SignInTab } from "./shell/sign-in";
+import { startStatusChecks } from "./shell/status";
+import { applyAppearance } from "./shell/theme";
+import { startTitleBar } from "./shell/titlebar";
+import { startToasts, toast } from "./shell/toast";
 import { errorMessage } from "./ui";
+import { enter, workspacePage } from "./workspace/page";
+import { currentDoc, openBlank, openFileDoc, openLibraryDoc, openServerDoc, restoreDoc } from "./workspace/store";
+
+// The look first, before anything is drawn.
+applyAppearance();
 
 // Every screen of the app, by address. More specific paths come first.
 route("/", homePage);
-route("/login", signInPage);
-route("/register", registerPage);
 route("/settings", settingsPage);
-
-// Online: circuits in your account on the server.
-route("/circuits", circuitListPage);
-route("/circuits/new", newCircuitPage);
-route("/circuits/new/draw", newDrawingPage);
-route("/circuits/new/netlist", newNetlistPage);
-route("/circuits/:id", circuitPage);
-route("/circuits/:id/edit", editDrawingPage);
-route("/circuits/:id/netlist", editNetlistPage);
-
-// Offline: the library (circuits saved in the app), and the circuit that's open.
 route("/library", libraryPage);
-route("/library/:id", openLibraryItemPage);
-route("/local", localPage);
-route("/local/new", newLocalDrawingPage);
-route("/local/new/netlist", newLocalNetlistPage);
-route("/local/draw", editLocalDrawingPage);
-route("/local/netlist", editLocalNetlistPage);
+route("/circuits", serverListPage);
+route("/workspace", workspacePage);
+
+// Addresses that open a circuit, then show it in the workspace (#/workspace).
+route("/library/:id", enter(({ params }) => openLibraryDoc(params["id"] ?? "")));
+route("/local", enter(() => currentDoc() ?? restoreDoc()));
+route("/local/draw", enter(() => currentDoc() ?? restoreDoc(), "draw"));
+route("/local/netlist", enter(() => currentDoc() ?? restoreDoc(), "net"));
+route("/local/new", enter(() => openBlank()));
+route("/local/new/netlist", enter(blankNetlist(false), "net"));
+route("/circuits/new", enter(() => openBlank(true)));
+route("/circuits/new/draw", enter(() => openBlank(true)));
+route("/circuits/new/netlist", enter(blankNetlist(true), "net"));
+route("/circuits/:id", enter(({ params, signal }) => openServerDoc(params["id"] ?? "", signal)));
+route("/circuits/:id/edit", enter(({ params, signal }) => openServerDoc(params["id"] ?? "", signal), "draw"));
+route("/circuits/:id/netlist", enter(({ params, signal }) => openServerDoc(params["id"] ?? "", signal), "net"));
+
+// Signing in is a dialog; these addresses open it over the home screen (then go on to `?next=`).
+route("/login", signInPageFor("in"));
+route("/register", signInPageFor("up"));
 
 setNotFoundPage(({ root }) => {
-  root.append(h("div", { class: "card empty-state" }, h("h1", {}, "Nothing here"), h("p", {}, h("a", { href: "#/" }, "Back to the home screen"))));
+  const home = h("button", { type: "button", class: "btn lg" }, "Back to the home screen");
+  home.addEventListener("click", goHome);
+  root.append(h("div", { class: "page-inner" }, h("div", { class: "empty-box" }, h("h2", {}, "Nothing here"), home)));
 });
 
-/** Shows the open netlist file: refreshes the file page if it's showing, otherwise goes there. */
-function showOpenFile(): void {
-  if (currentPath() === "/local") reload();
-  else navigate("/local");
+/** A new circuit in the netlist editor; `?ask=1` opens the assistant beside it. */
+function blankNetlist(forServer: boolean) {
+  return ({ query }: PageContext) => {
+    const doc = openBlank(forServer);
+    if (query.get("ask") === "1") setTimeout(() => openAssistant("new"), 0);
+    return doc;
+  };
 }
 
-/** Opens a .net file double-clicked in Explorer. */
+function signInPageFor(tab: SignInTab) {
+  return (context: PageContext): void => {
+    homePage(context);
+    const next = context.query.get("next");
+    // Only paths inside the app, never something like "//evil.example".
+    const safe = next !== null && next.startsWith("/") && !next.startsWith("//") ? next : null;
+    openSignIn(tab, () => navigate(safe ?? "/circuits?scope=owned"));
+  };
+}
+
+/** A .net file double-clicked in Explorer (or the one the app was started with). */
 function openDoubleClickedFile(path: string): void {
-  openPath(path).then(showOpenFile, (error: unknown) => alert(errorMessage(error)));
+  openFileDoc(path).then(
+    (doc) => {
+      if (doc !== null) goTo("/workspace");
+    },
+    (error: unknown) => toast(errorMessage(error), { error: true }),
+  );
 }
 
 const bridge = desktop();
 if (bridge !== null) {
-  // The File menu (electron/main.ts) sends its commands here.
+  // The app menu (electron/main.ts) sends its commands here.
   bridge.onMenuCommand((command) => {
-    if (command === "home") navigate("/");
-    if (command === "new") navigate("/local/new");
-    if (command === "library") navigate("/library");
-    if (command === "settings") navigate("/settings");
-    if (command === "open") {
-      openWithDialog().then(
-        (opened) => {
-          if (opened) showOpenFile();
-        },
-        (error: unknown) => alert(errorMessage(error)),
-      );
-    }
+    if (command === "home") goHome();
+    if (command === "new") newCircuit();
+    if (command === "library") goLibrary();
+    if (command === "settings") goSettings();
+    if (command === "open") void openNetlistFile();
   });
   // A file double-clicked while the app is open, and the one it was started with, if any.
   bridge.onOpenFile(openDoubleClickedFile);
@@ -87,5 +101,10 @@ if (bridge !== null) {
   });
 }
 
-startHeader(document.getElementById("header") as HTMLElement);
-startRouter(document.getElementById("app") as HTMLElement);
+document.getElementById("frame")?.classList.toggle("no-sidebar", sidebarHidden());
+startToasts(document.getElementById("toasts") as HTMLElement);
+startTitleBar(document.getElementById("titlebar") as HTMLElement);
+startSidebar(document.getElementById("sidebar") as HTMLElement);
+startKeys();
+startStatusChecks();
+startRouter(document.getElementById("view") as HTMLElement);

@@ -21,6 +21,8 @@
     "@circuitlab/assistant": "^0.1.0",
     "@circuitlab/engine": "^0.1.0",
     "@circuitlab/netlist": "^0.1.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
     "@types/node": "^24.0.0",
     "electron": "44.5.1",
     "electron-builder": "^26.15.3",

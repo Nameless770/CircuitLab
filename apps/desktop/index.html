@@ -1,17 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark" data-signal="amber">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- Only our own code may run. ws://localhost:5173 is Vite's hot reload during development. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:5173" />
+    <!-- Only our own code may run. ws://localhost:5173 is Vite's hot reload during development.
+         Fonts may also be data: URLs, because Vite puts the smallest font files inside the CSS. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:5173" />
     <meta name="description" content="Build digital logic circuits and simulate them, online or offline." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>CircuitLab</title>
   </head>
   <body>
-    <header id="header" class="site-header"></header>
-    <main id="app" class="site-main"></main>
+    <!-- The window: the title bar, then the sidebar and the screen you're on. Dialogs, the
+         assistant's panel and messages go in #overlays, on top of everything. -->
+    <div id="app">
+      <header id="titlebar" class="titlebar"></header>
+      <div id="frame" class="frame">
+        <nav id="sidebar" class="sidebar" aria-label="Places"></nav>
+        <main id="view" class="view"></main>
+      </div>
+      <div id="overlays"></div>
+      <div id="toasts"></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

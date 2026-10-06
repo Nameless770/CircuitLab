@@ -8,7 +8,7 @@ import { BrowserWindow, Menu, app, dialog, ipcMain, net, protocol, shell, type I
 import { AssistantError, DEFAULT_OLLAMA_URL, OllamaClient, listModels } from "@circuitlab/assistant";
 import { askAssistant, checkAssistant, chooseModel } from "./assistant";
 import type { AppSettings, AssistantRequest, AssistantSettingsChange, CircuitData, LibrarySaveRequest, LocalResult, LocalSimulateRequest, MenuCommand, OpenedFile } from "./bridge";
-import { SettingError, netlistFileFromArgs, normalizeApiUrl, normalizeOllamaUrl, readSavedSettings, type SavedSettings } from "./helpers";
+import { SettingError, netlistFileFromArgs, normalizeApiUrl, normalizeOllamaUrl, readSavedSettings, windowColors, type SavedSettings } from "./helpers";
 import { Library } from "./library";
 import * as offline from "./offline";
 
@@ -80,14 +80,23 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+/** Height of the window's own title bar (the top row of styles.css), which Windows' buttons sit in. */
+const TITLE_BAR_HEIGHT = 38;
+
 function createWindow(): void {
+  const colors = windowColors(saved.theme ?? "dark");
   const window = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 900,
     minHeight: 600,
     title: "CircuitLab",
-    backgroundColor: "#f6f7f9",
+    backgroundColor: colors.background,
+    // The page draws the title bar itself (the app's name, the search box, the theme switch), and
+    // Windows draws its own minimize, maximize and close buttons over its right end ("window
+    // controls overlay"). Its own buttons keep everything Windows offers, such as snap layouts.
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: colors.titleBar, symbolColor: colors.symbols, height: TITLE_BAR_HEIGHT },
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       // The window shows web content, so it gets no Node.js powers: only what preload.ts exposes.
@@ -261,6 +270,18 @@ async function forwardToApi(request: Request, url: URL): Promise<Response> {
 function registerIpcHandlers(): void {
   ipcMain.handle("circuitlab:get-settings", () => currentSettings());
 
+  ipcMain.handle("circuitlab:set-window-theme", async (event, theme: unknown) => {
+    if (theme !== "dark" && theme !== "light") return;
+    const window = windowOf(event);
+    const colors = windowColors(theme);
+    // The strip behind Windows' buttons (only on Windows and Linux; macOS draws its own).
+    if (window !== null && process.platform !== "darwin") window.setTitleBarOverlay({ color: colors.titleBar, symbolColor: colors.symbols, height: TITLE_BAR_HEIGHT });
+    window?.setBackgroundColor(colors.background);
+    if (saved.theme === theme) return;
+    saved = { ...saved, theme };
+    await writeSettings();
+  });
+
   ipcMain.handle("circuitlab:set-api-url", (_event, text: unknown) => attempt(() => saveApiUrl(typeof text === "string" ? text : null)));
 
   ipcMain.handle("circuitlab:set-assistant", (_event, change: unknown) => attempt(() => saveAssistant(assistantChange(change))));
@@ -416,17 +437,21 @@ function windowOf(event: IpcMainInvokeEvent): BrowserWindow | null {
 
 function buildMenu(): Menu {
   const send = (command: MenuCommand) => () => mainWindow?.webContents.send("circuitlab:menu", command);
+  // The window draws its own title bar (no menu bar shows on Windows), and handles Ctrl+N, Ctrl+O,
+  // Ctrl+H, Ctrl+L and Ctrl+, itself (src/shell/keys.ts). So these items have no shortcuts here:
+  // with both, one key press would run the command twice. The menu stays for macOS, and for the
+  // Edit and View roles (copy and paste, reload, developer tools).
   const template: MenuItemConstructorOptions[] = [
     {
       label: "File",
       submenu: [
-        { label: "Home", accelerator: "CmdOrCtrl+H", click: send("home") },
+        { label: "Home", click: send("home") },
         { type: "separator" },
-        { label: "New Offline Circuit", accelerator: "CmdOrCtrl+N", click: send("new") },
-        { label: "Open Netlist File…", accelerator: "CmdOrCtrl+O", click: send("open") },
-        { label: "Library", accelerator: "CmdOrCtrl+L", click: send("library") },
+        { label: "New Offline Circuit", click: send("new") },
+        { label: "Open Netlist File…", click: send("open") },
+        { label: "Library", click: send("library") },
         { type: "separator" },
-        { label: "Settings…", accelerator: "CmdOrCtrl+,", click: send("settings") },
+        { label: "Settings…", click: send("settings") },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],

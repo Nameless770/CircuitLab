@@ -12,7 +12,7 @@ internship project, in 13 phases (see the [roadmap](#roadmap)), and every phase 
 explains what was built and why.
 
 <p align="center">
-  <img src="docs/images/circuit-page.png" alt="The desktop app showing a full adder: the circuit drawn with green wires where a signal is 1, its inputs and outputs, and its truth table" width="720">
+  <img src="docs/images/circuit-page.png" alt="The desktop app showing a full adder: the circuit drawn with lit wires where a signal is 1, its input switches and output lamps, and its truth table" width="720">
 </p>
 
 ## What it does
@@ -330,15 +330,16 @@ The home screen offers two modes:
   truth tables in the background. It shows whether the server is reachable.
 - **Offline:** draw circuits and save them in the app's **library**, with no file dialog;
   the Library page (Ctrl+L) lists them all. Simulated by the app itself, so no account or server
-  is needed. `.net` files work too: File > Open (Ctrl+O), Import, and Export.
+  is needed. `.net` files work too: open one (Ctrl+O), import it, or export a circuit.
 
-In both modes, click a circuit's inputs to switch them and watch the wires light up. A circuit with
-a feedback loop (a latch) runs step by step and remembers its state. Truth tables page through
-any size, and export to CSV.
+In both modes the open circuit has three views: **Simulate** (click its inputs and watch the wires
+light up), **Draw**, and **Netlist** (the circuit as text). A circuit with a feedback loop (a latch)
+runs step by step and remembers its state. Truth tables page through any size, and export to CSV.
+Ctrl+K finds any command or circuit, and the window has a dark and a light theme.
 
-**The assistant** is in every netlist editor (and Home > Offline > Ask the assistant): describe a
-circuit, and a model running in Ollama on your computer drafts it. The app checks the draft, shows its
-truth table, and puts it in the editor only when you say so. It works with any model you have
+**The assistant** slides in over any screen (Ctrl+J): describe a circuit, and a model running in
+Ollama on your computer drafts it. The app checks the draft, shows its truth table, and puts it in
+the workspace only when you say so. It works with any model you have
 downloaded (choose it in Settings), and says plainly when Ollama isn't running. With the 3-billion
 parameter model it was built on, about half of the requests come out right, and the numbers, and why the
 model writes formulas instead of gates, are in [docs/assistant.md](docs/assistant.md).

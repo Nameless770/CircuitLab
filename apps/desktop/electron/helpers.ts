@@ -57,6 +57,18 @@ export function isLocalAddress(address: string): boolean {
   }
 }
 
+/** The window's two themes. The window keeps the choice itself; the main process only needs it for the frame. */
+export type WindowTheme = "dark" | "light";
+
+/**
+ * The colours of the window's frame in each theme: the background shown before the page has drawn,
+ * and the strip behind Windows' own minimize, maximize and close buttons (and the buttons' colour),
+ * which must match the page's title bar. The same values as --bg, --panel and --muted in styles.css.
+ */
+export function windowColors(theme: WindowTheme): { readonly background: string; readonly titleBar: string; readonly symbols: string } {
+  return theme === "light" ? { background: "#e6eaef", titleBar: "#f4f6f8", symbols: "#525e6f" } : { background: "#0e131a", titleBar: "#131a22", symbols: "#94a0b1" };
+}
+
 /** What settings.json holds. Every part is optional: nothing saved means the default. */
 export interface SavedSettings {
   /** Online mode's server. */
@@ -65,6 +77,8 @@ export interface SavedSettings {
   readonly assistantUrl?: string;
   /** The Ollama model the assistant uses; without it, the first one Ollama lists. */
   readonly assistantModel?: string;
+  /** The theme the window last used, so the next window opens in its colours. */
+  readonly theme?: WindowTheme;
 }
 
 /**
@@ -85,10 +99,12 @@ export function readSavedSettings(data: unknown): SavedSettings {
   const apiUrl = address(record["apiUrl"], normalizeApiUrl);
   const assistantUrl = address(record["assistantUrl"], normalizeOllamaUrl);
   const model = record["assistantModel"];
+  const theme = record["theme"];
   return {
     ...(apiUrl !== undefined && { apiUrl }),
     ...(assistantUrl !== undefined && { assistantUrl }),
     ...(typeof model === "string" && model.trim() !== "" && model.length <= 200 && { assistantModel: model.trim() }),
+    ...((theme === "dark" || theme === "light") && { theme }),
   };
 }
 

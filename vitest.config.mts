@@ -20,8 +20,10 @@ export default defineConfig({
       { extends: true, test: { name: "api-contract", include: ["packages/api-contract/test/**/*.test.ts"] } },
       // Each API test file starts the whole app (and, for PostgreSQL, a database): give them time.
       { extends: true, test: { name: "api", include: ["apps/api/test/**/*.test.ts"], testTimeout: 20_000 } },
-      // The desktop app's plain logic (layout, editing rules, offline simulation); the UI itself is checked by hand.
-      { extends: true, test: { name: "desktop", include: ["apps/desktop/test/**/*.test.ts"] } },
+      // The desktop app's plain logic (layout, editing rules, offline simulation); the screens are
+      // checked by its smoke test. Vitest blanks CSS files unless told otherwise: one test reads the
+      // stylesheet's colours.
+      { extends: true, test: { name: "desktop", include: ["apps/desktop/test/**/*.test.ts"], css: { include: [/apps\/desktop\/src\/styles\.css/] } } },
     ],
     coverage: {
       provider: "v8",

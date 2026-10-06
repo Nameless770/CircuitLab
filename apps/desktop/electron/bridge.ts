@@ -1,4 +1,5 @@
 import type { Bit, Gate, SimulationMode, Wire } from "@circuitlab/engine";
+import type { WindowTheme } from "./helpers";
 
 /**
  * Everything the app window may ask the main process to do, and the shapes that travel between
@@ -50,7 +51,14 @@ export interface DesktopBridge {
   cancelAssistant(): Promise<void>;
   /** Before each time the model is asked, while askAssistant is working. */
   onAssistantProgress(listener: (progress: AssistantProgress) => void): void;
+  /**
+   * The window's theme changed (or the window just started): the main process colours the strip
+   * behind Windows' own window buttons to match, and opens the next window in this theme.
+   */
+  setWindowTheme(theme: WindowTheme): Promise<void>;
 }
+
+export type { WindowTheme };
 
 export type MenuCommand = "open" | "new" | "home" | "library" | "settings";
 
