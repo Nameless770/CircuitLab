@@ -337,8 +337,9 @@ light up), **Draw**, and **Netlist** (the circuit as text). A circuit with a fee
 runs step by step and remembers its state. Truth tables page through any size, and export to CSV.
 Ctrl+K finds any command or circuit, and the window has a dark and a light theme.
 
-**The assistant** slides in over any screen (Ctrl+J): describe a circuit, and a model running in
-Ollama on your computer drafts it. The app checks the draft, shows its truth table, and puts it in
+**The assistant** (Ctrl+J) sits beside the circuit you're building, in the workspace's right-hand
+column, or slides in over any other screen: describe a circuit or a change to it, and a model running
+in Ollama on your computer drafts it. The app checks the draft, shows its truth table, and puts it in
 the workspace only when you say so. It works with any model you have
 downloaded (choose it in Settings), and says plainly when Ollama isn't running. With the 3-billion
 parameter model it was built on, about half of the requests come out right, and the numbers, and why the

@@ -364,9 +364,14 @@ try {
     await badgeIs("In your library");
   });
 
-  await step("assistant: change the circuit that is open, undo, then keep it", async () => {
+  await step("assistant: beside the drawing, change the open circuit, undo, then keep it", async () => {
+    await page.keyboard.press("Control+2"); // drawing
+    await page.locator(".canvas.drawing").waitFor();
     await moreMenu("Ask the assistant to change it");
-    await assistant.waitFor();
+    // In the workspace the panel takes the right-hand column, instead of covering the circuit.
+    await page.locator(".inspector .assistant.docked").waitFor();
+    assert.equal(await page.getByRole("button", { name: "Assistant", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.ok(await page.locator(".canvas.drawing").isVisible(), "the drawing stays in view");
     assert.equal(await assistant.getByRole("button", { name: "Change the open circuit" }).getAttribute("aria-pressed"), "true");
     await request.fill("invert the carry output");
     await askButton.click();
@@ -376,19 +381,39 @@ try {
     assert.match(question, /^Here is the current circuit:\n\{/);
     assert.ok(question.includes('"formula":"A ^ B ^ CIN"'), "the open circuit's formulas");
     assert.ok(question.endsWith("Change it like this: invert the carry output\nAnswer with the complete new circuit."));
+    await screenshot("assistant-docked");
     await assistant.getByRole("button", { name: "Use this in the open circuit" }).click();
-    await page.locator('[data-type="NOT"]').first().waitFor();
+    // Still drawing, with the panel still beside the drawing, which now has the change.
+    await page.locator('.canvas.drawing [data-type="NOT"]').first().waitFor();
+    await page.locator(".inspector .assistant.docked").waitFor();
     await badgeIs("In your library"); // still where it's saved, with unsaved changes
-    await page.locator(".toast button", { hasText: "Undo" }).click();
+    await assistant.locator(".alert.ok", { hasText: "The assistant's change is in the open circuit" }).waitFor();
+    await assistant.getByRole("button", { name: "Undo", exact: true }).click();
     await page.locator('[data-type="NOT"]').first().waitFor({ state: "detached" });
+    // The column remembers its tab: away and back, the assistant is still there.
+    await go("#/");
+    await page.locator(".home").waitFor();
+    await go("#/workspace");
+    await page.locator(".inspector .assistant.docked").waitFor();
     // And once more, this time keeping it.
-    await openAssistant();
     await askButton.click();
     await see("The same circuit, with the carry turned upside down.");
     await assistant.getByRole("button", { name: "Use this in the open circuit" }).click();
+    await page.locator('.canvas.drawing [data-type="NOT"]').first().waitFor();
+    // After an edit of your own, Undo would throw that away too: it refuses, and keeps both.
+    await addGate("BUF");
+    await assistant.getByRole("button", { name: "Undo", exact: true }).click();
+    await assistant.getByText("Not undone: the circuit has changed since").waitFor();
+    assert.ok((await page.locator('[data-type="NOT"]').count()) > 0, "the assistant's change is still there");
+    await page.keyboard.press("Delete"); // the new gate is still selected
+    await page.locator('[data-type="BUF"]').first().waitFor({ state: "detached" });
     await saveButton("Save to library").click();
     await openCircuitIs("Inverted-carry adder");
     await screenshot("assistant-changed");
+    // Back to the details of the drawing.
+    await page.getByRole("button", { name: "Details", exact: true }).click();
+    await page.locator(".inspector .assistant").waitFor({ state: "detached" });
+    await page.locator(".inspector").getByRole("button", { name: "Check", exact: true }).waitFor();
     // Leave the library as the steps after this one expect it.
     await moreMenu("Delete from the library");
     await atHash("#/library");
@@ -436,15 +461,19 @@ try {
     await openCircuitIs("Untitled circuit");
     await see("Save puts it in your account");
     await openAssistant();
+    await page.locator(".inspector .assistant.docked").waitFor(); // beside the empty drawing
     assert.ok(await assistant.getByRole("button", { name: "Change the open circuit" }).isDisabled(), "an empty circuit has nothing to change");
     await request.fill("a full adder");
     await askButton.click();
     await see("SUM is the parity of the inputs");
     await assistant.getByRole("button", { name: "Use this in the editor" }).click();
     await openCircuitIs("Full adder");
+    await page.locator('.canvas.drawing [data-gate="xor1"]').waitFor(); // drawn, and still in Draw mode
     await saveButton("Save").click();
     await see("Saved “Full adder” in your account.");
     await badgeIs("Private");
+    await page.getByRole("button", { name: "Details", exact: true }).click();
+    await setMode("Simulate");
     await see("Simulated by the server.");
     await screenshot("assistant-online");
     // Leave the account as the steps after this one expect it: no circuits yet.
@@ -490,7 +519,7 @@ try {
     await page.getByRole("button", { name: "Compute in the background" }).click();
     await see("Done.");
     await page.getByRole("button", { name: "Download result (CSV)" }).waitFor();
-    await page.locator(".inspector").evaluate((element) => (element.scrollTop = element.scrollHeight));
+    await page.locator(".ins-body").evaluate((element) => (element.scrollTop = element.scrollHeight));
     await screenshot("online-job");
   });
 

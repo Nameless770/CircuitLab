@@ -234,9 +234,9 @@ certificate, which costs money and needs a verified identity; see the known shor
 
 ### 11. The assistant
 
-A panel that slides in over any screen (Ctrl+J, or the card at the bottom of the sidebar) and
-drafts circuits with a model running in Ollama. How it works, and how good it is, is in
-[assistant.md](assistant.md). What belongs here is how it sits in the app:
+A panel that drafts circuits with a model running in Ollama (Ctrl+J, or the card at the bottom of
+the sidebar). How it works, and how good it is, is in [assistant.md](assistant.md). What belongs
+here is how it sits in the app:
 
 - **In the main process,** like offline mode: the window may only talk to its own origin, and
   Ollama is another address. [assistant.ts](../apps/desktop/electron/assistant.ts) chooses the model and
@@ -253,12 +253,30 @@ drafts circuits with a model running in Ollama. How it works, and how good it is
   time: asking again stops the one before.
 - **One more setting file part.** `settings.json` now also holds Ollama's address and the model.
   Each part is read on its own, so a bad address doesn't lose the others, and saving one part keeps the rest.
-- **Two things to ask for** ([drawer.ts](../apps/desktop/src/assistant/drawer.ts)):
+- **Two places for one panel** ([drawer.ts](../apps/desktop/src/assistant/drawer.ts)):
+  - **In the workspace it sits beside the circuit,** in the right-hand column: an "Assistant" tab
+    next to "Details". You can keep drawing, simulating or editing the netlist while you ask, and
+    a draft you use goes into the circuit without leaving the mode you're in. The panel stays open
+    for the next question. The column remembers its tab, so the assistant is still there when you
+    come back to the workspace.
+  - **On any other screen it slides in over the screen,** and closes when you use a draft (the
+    workspace then shows it, simulated) or press Esc.
+  - **How:** the panel is one element, made once and kept, so what you typed and the last draft
+    survive. While the workspace is on screen it offers its column (`offerAssistantDock`), and the
+    panel moves in there; otherwise it goes in the overlay layer. A panel already open over the
+    screen moves into the column when you go to the workspace.
+- **Two things to ask for:**
   - **"A new circuit":** the answer opens in the workspace, not saved yet. If the open circuit is a
     new, empty one, the answer goes into it instead, so Save still puts it where that circuit was
     going (your account, for a "New circuit" started from My circuits).
-  - **"Change the open circuit":** the model is shown the open circuit and answers with the whole
-    changed circuit, which replaces it, unsaved. A message offers Undo for a few seconds.
+  - **"Change the open circuit"** (the choice it starts on beside a circuit): the model is shown
+    the open circuit and answers with the whole changed circuit, which replaces it, unsaved.
+- **Undo** (in the panel beside the circuit, or in the message at the bottom otherwise) brings back
+  the circuit as it was before the change. It only works while the circuit is still as the
+  assistant left it: after an edit of your own it refuses and says why, instead of throwing your
+  edit away too. It compares a fingerprint of the circuit (gates, wires, pins, name, description,
+  netlist text being typed); moving gates doesn't count. If you saved the change in between, Undo
+  still works and the circuit becomes unsaved again.
 
 ### 12. The redesign: one window, one open circuit
 
@@ -272,10 +290,11 @@ before is still there, restyled.
 │ New circuit       │ Home, Library, the server's lists, Settings, or the       │
 │ This computer     │ workspace:                                                │
 │  Home, Library,   │ ┌ name, badge · Simulate|Draw|Netlist · Save · More ▾ ┐   │
-│  the open circuit │ │ the drawing, or the netlist text │ the inspector    │   │
+│  the open circuit │ │ the drawing, or the netlist text │ Details|Assistant│   │
 │ Server            │ │ the truth table (a drawer, T)    │ (inputs, outputs,│   │
-│ assistant card    │ │                                  │  sharing, ...)   │   │
-│ status · account  │ └──────────────────────────────────┴──────────────────┘   │
+│ assistant card    │ │                                  │  sharing, ... or │   │
+│ status · account  │ │                                  │  the assistant)  │   │
+│                   │ └──────────────────────────────────┴──────────────────┘   │
 └───────────────────┴───────────────────────────────────────────────────────────┘
 ```
 
@@ -325,7 +344,7 @@ a recent file or a library circuit by typing part of its name. `?` lists every s
 | --- | --- |
 | Ctrl+K | The command palette |
 | Ctrl+N, Ctrl+O | A new circuit; open a netlist file |
-| Ctrl+J | The assistant |
+| Ctrl+J | The assistant (in the workspace: its tab in the right-hand column) |
 | Ctrl+H, Ctrl+L, Ctrl+, | Home, the library, Settings |
 | Ctrl+B | Hide or show the sidebar |
 | Ctrl+S | Save the open circuit |
@@ -335,7 +354,7 @@ a recent file or a library circuit by typing part of its name. `?` lists every s
 | T | Open or close the truth table |
 | F, +, − | Fit the drawing to the window; zoom in and out |
 | A, Delete | Arrange the gates; delete the selection (Draw) |
-| Esc | Close a dialog or the assistant; clear the selection |
+| Esc | Close a dialog, or the assistant when it's over the screen; leave the assistant's text box; clear the selection |
 
 **Pictures everywhere.** The home screen runs a half adder through its four input combinations,
 and every card in the lists shows a small drawing of its circuit, lit by a local simulation
@@ -372,8 +391,9 @@ view, and not at all for circuits over 150 gates.
     - an account, sharing, making a circuit public, a background job, editing a server circuit,
       uploading, the server's cache;
     - the assistant, against a fake Ollama: choosing a model in Settings, drafting a circuit (into the
-      library, and into a new circuit for the account), changing the open circuit and undoing,
-      Cancel, a refusal, Ollama not running.
+      library, and into a new circuit for the account), changing the open circuit from the panel
+      beside the drawing (still in Draw mode afterwards, the tab remembered, Undo, and Undo refusing
+      after an edit of your own), Cancel, a refusal, Ollama not running.
   - **Isolation.** It uses a throwaway profile (`CIRCUITLAB_USER_DATA_DIR`), so it never signs
     you out or fills your list of recent files.
 
@@ -395,6 +415,7 @@ Things I chose not to do yet, and why:
 | Gates you drag are remembered at once, even if you then close the circuit without saving | Positions only change how it looks, never what it does | Keep moved positions with the unsaved changes |
 | The window's code has its own small copies of the loop finder and the netlist writer | The window can't run the engine's Node code; unit tests check the copies against the real ones | Build those parts of the engine for the browser too |
 | No menu bar on Windows (the title bar is drawn by the page) | Every menu command is in the command palette (Ctrl+K) and on a shortcut | Draw a menu button in the title bar |
+| The workspace's right-hand column shows the details or the assistant, not both | One column keeps the drawing wide; a click (or Ctrl+J) switches, and each keeps its state | Both at once, one above the other, or a column you can drag wider |
 | The installer isn't code-signed, so Windows SmartScreen warns before running it | Fine for a demo; signing needs a paid certificate and a verified identity | A code-signing certificate (or Azure Trusted Signing), set up in electron-builder |
 | No automatic updates: a new version means running a new installer | Releases are rare | electron-updater, with the installers published somewhere it can check |
 | The installer makes CircuitLab the program for every `.net` file, and other tools use that extension too (KiCad writes netlists as `.net`) | CircuitLab's own files are `.net`; you can pick another program with "Open with" | Ask during installation, or use a more specific extension |

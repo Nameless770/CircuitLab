@@ -1767,15 +1767,36 @@ table.tt {
   padding: 3px 10px;
 }
 
-/* The inspector, on the right. */
+/* The column on the right: two tabs (Details, Assistant), then what the chosen one shows. */
 .inspector {
   border-left: 1px solid var(--line);
   background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.ins-tabs {
+  flex: none;
+  padding: 12px 16px 0;
+}
+.ins-body {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.ins-assistant {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ws-body.with-assistant {
+  grid-template-columns: minmax(0, 1fr) 360px;
 }
 .ins-section {
   display: flex;
@@ -2125,6 +2146,31 @@ table.tt {
   flex-direction: column;
   animation: clSlide 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
   z-index: 20;
+}
+/* In the workspace's right-hand column: part of the page instead of over it. The tab above it is
+   its title, so it has no head of its own, and its rows wrap to fit the narrower column. */
+.assistant.docked {
+  position: static;
+  width: auto;
+  flex: 1;
+  min-height: 0;
+  border-left: 0;
+  box-shadow: none;
+  animation: clFade 0.2s ease-out;
+  z-index: auto;
+}
+.assistant.docked .as-head {
+  display: none;
+}
+.assistant.docked .as-row {
+  flex-wrap: wrap;
+}
+.assistant.docked .as-row > .seg {
+  flex: 1 1 100%;
+}
+.assistant.docked .as-row > .seg > button {
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 .as-head {
   display: flex;

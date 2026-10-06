@@ -1,4 +1,4 @@
-import { assistantIsOpen, closeAssistant, openAssistant } from "../assistant/drawer";
+import { assistantFloating, assistantHasFocus, closeAssistant, openAssistant } from "../assistant/drawer";
 import { desktop } from "../desktop";
 import { goHome, goLibrary, goSettings, newCircuit, openNetlistFile, toggleSidebar } from "./commands";
 import { closeTopOverlay, overlayOpen } from "./overlay";
@@ -20,11 +20,17 @@ export function startKeys(): void {
       return;
     }
     if (event.key === "Escape") {
-      // The top dialog first, then the assistant's panel. Whatever closes, the key stops here
-      // (the workspace would otherwise also take it, and drop the selection).
+      // The top dialog first, then the assistant's panel when it is over the screen. Whatever
+      // closes, the key stops here (the workspace would otherwise also take it, and drop the selection).
       let closed = closeTopOverlay();
-      if (!closed && assistantIsOpen()) {
+      if (!closed && assistantFloating()) {
         closeAssistant();
+        closed = true;
+      }
+      // In the workspace's column the panel stays: Esc only leaves its text box, so the
+      // workspace's own keys (1 to 9, T, F, ...) work again.
+      if (!closed && assistantHasFocus() && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
         closed = true;
       }
       if (closed) {

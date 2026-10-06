@@ -133,7 +133,8 @@ export function createCanvas(ws: Ws, actions: CanvasActions): Canvas {
     const size = drawingSize(model());
     const width = scroller.clientWidth - 80 - (drawing ? 140 : 0);
     const height = scroller.clientHeight - 80;
-    fitted = Math.round(Math.max(0.35, Math.min(1.7, Math.min(width / size.width, height / size.height))) * 20) / 20;
+    // Down to a multiple of 5%: rounding up would make the drawing a little too big, and scroll.
+    fitted = Math.floor(Math.max(0.35, Math.min(1.7, Math.min(width / size.width, height / size.height))) * 20) / 20;
     redraw();
   }
 

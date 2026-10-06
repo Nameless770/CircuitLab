@@ -10,7 +10,7 @@ anything in your circuit by itself: it checks the draft, shows how it behaves (i
 waits for you to press "Use this in the editor".
 
 <p align="center">
-  <img src="images/assistant.png" alt="The assistant's panel over the app: a request for a full adder, and the draft the model made, with a drawing, its truth table, and the button that puts it in the workspace" width="720">
+  <img src="images/assistant.png" alt="The workspace in Draw mode with the assistant in the right-hand column: a request to change the open circuit, and the draft the model made, with a drawing, its truth table, and the button that puts it in the circuit" width="720">
 </p>
 
 ```bash
@@ -19,9 +19,12 @@ npm run eval:assistant                       # how good is the model you have? (
 npm run eval:assistant -- llama3.2:3b        # the same, for one model by name
 ```
 
-It's one panel that slides in over any screen: press **Ctrl+J**, click **Ask the assistant** at the
-bottom of the sidebar or on the home screen, or choose **More > Ask the assistant to change it** on
-an open circuit. It works offline and online, since it only fills in the workspace.
+To open it, press **Ctrl+J**, click **Ask the assistant** at the bottom of the sidebar or on the home
+screen, or choose **More > Ask the assistant to change it** on an open circuit. In the workspace it
+sits **beside the circuit**, in the right-hand column (the **Assistant** tab next to **Details**), so
+you can keep drawing or simulating while you ask, and see each change land in the circuit. On other
+screens it slides in over the screen. It works offline and online, since it only fills in the
+workspace.
 
 ## What it does
 
@@ -31,8 +34,9 @@ an open circuit. It works offline and online, since it only fills in the workspa
 3. You see a **draft**: the model's one-sentence idea, the gates and inputs and outputs, a drawing, the
    whole truth table (up to 4 inputs), and the netlist.
 4. **Use this in the editor** opens it in the workspace, not saved yet; **Use this in the open circuit**
-   replaces the open circuit with it (with **Undo**). Then check it and save as usual. **Discard** throws
-   it away.
+   replaces the open circuit with it (with **Undo**, as long as you haven't changed the circuit since).
+   Beside the circuit, the panel stays open and you stay in the mode you were in. Then check it and save
+   as usual. **Discard** throws it away.
 
 If Ollama isn't running, the panel says so and how to fix it; if the model can't do it, it says that
 too, with the model's own words.
@@ -174,7 +178,8 @@ What to take from it, honestly:
   *formula*, which it reads with its own parser (never `eval`), builds a netlist from, and reads back with
   the netlist parser. Nothing the model writes is run, opened, or shown as HTML.
 - **Nothing reaches the circuit without you.** The draft goes into the workspace only when you press
-  "Use this", unsaved, and the workspace's own Check and Save still apply (Undo restores what was there).
+  "Use this", unsaved, and the workspace's own Check and Save still apply (Undo restores what was there,
+  and refuses rather than lose an edit you made after the change).
 - **It stays on your computer** when Ollama does: the panel says "on this computer: what you write here
   doesn't leave it". If you point it at another address, the panel says "which is not this computer:
   what you write here is sent there", instead.

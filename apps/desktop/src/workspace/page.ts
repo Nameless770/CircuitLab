@@ -1,6 +1,6 @@
 import type { Bit } from "@circuitlab/engine";
 import { checkCircuit } from "../api";
-import { openAssistant } from "../assistant/drawer";
+import { closeAssistant, offerAssistantDock, openAssistant } from "../assistant/drawer";
 import { desktop, requireDesktop, unwrap } from "../desktop";
 import { formatDate, h, plural } from "../dom";
 import { toCircuitInput } from "../editor/draft";
@@ -87,7 +87,13 @@ function nothingOpen(): HTMLElement {
 function mount(root: HTMLElement, doc: OpenDoc, signal: AbortSignal): void {
   const head = h("div", { class: "ws-head" });
   const stage = h("div", { class: "ws-stage" });
-  const inspector = h("aside", { class: "inspector", "aria-label": "Inspector" });
+  // The right-hand column has two tabs: the details of what you're doing (the inputs and outputs,
+  // the selected gate, the netlist cheat sheet), and the assistant (desktop app only).
+  const details = h("div", { class: "ins-body" });
+  const assistantSpot = h("div", { class: "ins-assistant", hidden: true });
+  const tabs = h("div", { class: "seg sm fill", role: "group", "aria-label": "Right-hand panel" });
+  const hasAssistant = desktop() !== null;
+  const inspector = h("aside", { class: "inspector", "aria-label": "Inspector" }, hasAssistant ? h("div", { class: "ins-tabs" }, tabs) : null, details, assistantSpot);
   let canvas: Canvas | null = null;
   let netStage: NetlistStage | null = null;
 
@@ -117,7 +123,8 @@ function mount(root: HTMLElement, doc: OpenDoc, signal: AbortSignal): void {
   const simulator = createSimulator(ws);
   const table = createTable(ws, { pickRow: (inputs) => setInputs(inputs) });
 
-  root.append(h("div", { class: "ws" }, head, h("div", { class: "ws-body" }, h("div", { class: "ws-main" }, stage, table.element), inspector)));
+  const body = h("div", { class: "ws-body" }, h("div", { class: "ws-main" }, stage, table.element), inspector);
+  root.append(h("div", { class: "ws" }, head, body));
 
   // ---- the switches -----------------------------------------------------------------------------
 
@@ -345,8 +352,8 @@ function mount(root: HTMLElement, doc: OpenDoc, signal: AbortSignal): void {
   function renderInspectorPart(): void {
     // Typing in one of its fields mustn't be interrupted by a redraw (the drawing redraws, the field stays).
     const active = document.activeElement;
-    if (active instanceof HTMLElement && inspector.contains(active) && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
-    inspector.replaceChildren(
+    if (active instanceof HTMLElement && details.contains(active) && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
+    details.replaceChildren(
       ...renderInspector(ws, {
         toggleInput,
         reset,
@@ -399,6 +406,49 @@ function mount(root: HTMLElement, doc: OpenDoc, signal: AbortSignal): void {
     ws.problemGates = ids;
     if (errorDetails(error).issues.length > 0) ws.drawCheck = { ok: false, error };
     canvas?.redraw();
+  }
+
+  // ---- the right-hand column: Details, or the assistant -----------------------------------------
+
+  function showTab(tab: RightTab, remember = true): void {
+    details.hidden = tab !== "details";
+    assistantSpot.hidden = tab !== "assistant";
+    // The assistant gets a little more room than the details: its drafts have a picture and a table.
+    body.classList.toggle("with-assistant", tab === "assistant");
+    tabs.replaceChildren(
+      ...(
+        [
+          ["details", "Details", "Inputs and outputs, the selected gate, help"],
+          ["assistant", "Assistant", "Ask for a circuit, or a change to this one (Ctrl J)"],
+        ] as const
+      ).map(([value, label, title]) => {
+        const button = h("button", { type: "button", "aria-pressed": tab === value ? "true" : "false", title }, label);
+        // The assistant's own code moves its panel in and out (it also opens from Ctrl J, the
+        // sidebar and the More menu), and calls show() or hide() below.
+        button.addEventListener("click", () => (value === "assistant" ? openAssistant() : closeAssistant()));
+        return button;
+      }),
+    );
+    if (remember) rememberTab(tab);
+  }
+
+  const startOnAssistant = rememberedTab() === "assistant";
+  showTab("details", false);
+  if (hasAssistant) {
+    offerAssistantDock(
+      {
+        show(element) {
+          assistantSpot.replaceChildren(element);
+          showTab("assistant");
+        },
+        hide() {
+          assistantSpot.replaceChildren();
+          showTab("details");
+        },
+      },
+      startOnAssistant,
+      signal,
+    );
   }
 
   // ---- the keyboard -----------------------------------------------------------------------------
@@ -487,6 +537,26 @@ function mount(root: HTMLElement, doc: OpenDoc, signal: AbortSignal): void {
   renderStage();
   renderInspectorPart();
   simulator.run(false);
+}
+
+/** What the right-hand column shows; the choice is kept on this computer. */
+type RightTab = "details" | "assistant";
+const TAB_KEY = "circuitlab.rightTab";
+
+function rememberedTab(): RightTab {
+  try {
+    return localStorage.getItem(TAB_KEY) === "assistant" ? "assistant" : "details";
+  } catch {
+    return "details";
+  }
+}
+
+function rememberTab(tab: RightTab): void {
+  try {
+    localStorage.setItem(TAB_KEY, tab);
+  } catch {
+    // not remembered
+  }
 }
 
 function badgeOf(doc: OpenDoc): readonly [string, string] {
