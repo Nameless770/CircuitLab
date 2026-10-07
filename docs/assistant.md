@@ -197,7 +197,7 @@ What to take from it, honestly:
 models is what Ollama says it has (newest first), so there's nothing to type, and "Automatic" means the
 newest. A model you chose and later removed stays in the list marked "(not installed)", and the
 assistant falls back to the newest meanwhile and says so. `CIRCUITLAB_OLLAMA_URL` overrides the address
-for one run (the smoke test uses the Settings screen instead, like a person would).
+for one run (the end-to-end tests use settings.json instead, like a person's saved settings).
 
 ## Testing
 
@@ -212,8 +212,10 @@ for one run (the smoke test uses the Settings screen instead, like a person woul
     isn't retried, that the checks trigger a retry;
   - the Ollama client against a fake web server: every way it can fail (not running, model missing, an
     error, not Ollama, too slow, cancelled) has its own message.
-- **The smoke test** drives the real app against a fake Ollama (the same HTTP API, a canned answer):
-  Settings, drafting a circuit offline and online, using it, changing a circuit and undoing, Cancel, a
+- **The end-to-end tests** ([assistant.spec.ts](../apps/desktop/e2e/assistant.spec.ts), and parts of
+  settings.spec.ts and online.spec.ts) drive the real app against a fake Ollama (the same HTTP API,
+  canned answers): what is sent to the model, drafting a circuit offline and online, using it, the panel
+  beside the drawing, changing a circuit and undoing (and Undo refusing after an edit), Cancel, a
   refusal, an empty request, Ollama not running, and the settings being kept.
 - **The evaluation** (`npm run eval:assistant`) is the only thing that needs a real model, so it is
   not in CI.

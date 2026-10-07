@@ -188,7 +188,7 @@ npm run start:api      # phase 4: runs the API on http://localhost:3000/v1
 npm run start:worker   # phase 10: a worker process that computes truth-table jobs (needs REDIS_URL)
 npm run dev:desktop    # the desktop app, with hot reload (run start:api too, for online mode)
 npm run start:desktop  # the desktop app, built as users get it
-npm run smoke:desktop  # clicks through the real desktop app (Playwright); screenshots in apps/desktop/dist/smoke/
+npm run e2e:desktop    # end-to-end tests: 35 tests click through the real desktop app (Playwright Test)
 npm run eval:assistant # how good is the assistant with the model you have? Needs Ollama running (docs/assistant.md)
 npm run package:desktop # the Windows installer: apps/desktop/release/CircuitLab-Setup-0.1.0.exe
 npm run lint:api       # checks openapi.yaml (Redocly, fetched on first use)

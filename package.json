@@ -26,7 +26,7 @@
     "start:worker": "npm run build && node --env-file-if-exists=.env apps/api/dist/worker.js",
     "dev:desktop": "npm run build && npm run dev -w @circuitlab/desktop",
     "start:desktop": "npm run build && npm run start -w @circuitlab/desktop",
-    "smoke:desktop": "npm run build && npm run smoke -w @circuitlab/desktop",
+    "e2e:desktop": "npm run build && npm run e2e -w @circuitlab/desktop",
     "package:desktop": "npm run build && npm run package -w @circuitlab/desktop",
     "demo:http": "npm run build && node examples/dist/http-demo.js",
     "demo:auth": "npm run build && node examples/dist/auth-demo.js",

@@ -18,7 +18,8 @@ container (`redis:8-alpine`), and the test with several processes also starts a 
 | `npm run test:coverage` | The same, with a coverage report (`coverage/index.html`); fails below the thresholds |
 | `npm run test:watch` | Re-runs tests as files change; run `npx tsc -b -w` alongside so the build stays current |
 | `npx vitest run --project engine` | One package: `engine`, `netlist`, `assistant`, `runner`, `api-contract`, `api`, or `desktop` |
-| `npm run smoke:desktop` | Clicks through the real desktop app with Playwright (see [desktop-app.md](desktop-app.md#testing)); not part of `npm test` |
+| `npm run e2e:desktop` | The end-to-end tests: 35 tests click through the real desktop app (see [End-to-end tests](#end-to-end-tests-the-desktop-app)); not part of `npm test` |
+| `npm run e2e:report -w @circuitlab/desktop` | Opens the last end-to-end run's HTML report (screens and traces of failures) |
 
 The desktop app's unit tests test its source directly (Vite transforms them), not a build: its
 window code is bundled by Vite, never compiled by `tsc` alone. `npm test` type-checks them with
@@ -253,6 +254,64 @@ Phase 10 added:
 They run on both setups, so the Redis throttle and the job results answer to the injected clock
 too; see [design-patterns.md](design-patterns.md).
 
+## End-to-end tests (the desktop app)
+
+```bash
+npm run e2e:desktop                                     # build everything, then run them (about a minute)
+npm run e2e:report -w @circuitlab/desktop               # the HTML report of the last run
+cd apps/desktop && npx playwright test -c e2e -g latch  # only the tests whose name has "latch"
+npm run package:desktop && npm run e2e:packaged -w @circuitlab/desktop  # against the installed files
+```
+
+The unit tests check the logic piece by piece. These check the whole app the way a person uses it: they
+start the real program, click and type in its window, and look at what it shows. They live in
+[apps/desktop/e2e](../apps/desktop/e2e), one file per area:
+
+| File | Tests | What |
+| --- | --- | --- |
+| startup.spec.ts | 4 | Started with a `.net` file (as a double-click does); a second launch hands its file to the running app and quits; saving a drawing over a file with comments asks first; a file with mistakes is refused with a message |
+| simulate.spec.ts | 4 | Input switches, the 1 to 9 keys, clicking an input in the drawing, a truth-table row that sets the inputs; an SR latch that remembers |
+| draw.spec.ts | 3 | Drawing a circuit from the palette, wiring it with the mouse, Check, saving it; deleting a gate and its wires; "unsaved" only after a change; exporting a file |
+| netlist.spec.ts | 2 | A mistake listed and marked on its line, then the fixed text applied; leaving Netlist mode with mistakes |
+| library.spec.ts | 3 | Saving, listing newest first, filtering, searching, opening, deleting (and the files on disk); the home screen's list; Close and the command palette |
+| assistant.spec.ts | 8 | Against a fake Ollama: a draft and what was sent to the model; the panel beside the drawing; Undo, and Undo refusing after an edit; the remembered tab; Esc; an empty circuit taking the draft; Cancel, a refusal, an empty request; Ollama not running |
+| settings.spec.ts | 3 | The server address (checked, saved, used), Ollama's address and model, the theme and signal colour |
+| online.spec.ts | 8 | Against an API in memory: an account; server simulation and its cache; sharing, seen from the other account; making a circuit public; a background job; a new version; copying to and from the library; a new circuit for the account drafted by the assistant |
+
+**How they're built:**
+- **[Playwright Test](https://playwright.dev/docs/test-intro)** runs them. Playwright can drive Electron
+  apps, waits for the screen by itself (`expect(...).toBeVisible()` retries until it's true, so there are
+  almost no fixed pauses), and writes an HTML report.
+- **Each test starts the app afresh, with a throwaway profile** (`CIRCUITLAB_USER_DATA_DIR`), so tests
+  don't depend on each other and can run in any order, two at a time. They never touch your own settings,
+  library or sign-in.
+- **[fixtures.ts](../apps/desktop/e2e/fixtures.ts) gives every test what it needs:** the app, its
+  window, the profile (with this run's servers already saved in Settings, as a person would have them),
+  and per worker an API in memory and a fake Ollama with canned answers. A test only asks for what it
+  uses: `test("...", async ({ ui, profileDir }) => ...)`.
+- **[circuitlab.ts](../apps/desktop/e2e/circuitlab.ts) speaks the app's language** ("open the example",
+  "flip input A", "wire A to and1"), so the CSS selectors are in one place and the tests read as steps
+  (the "page object" pattern).
+- **A failure explains itself:** the report has a screenshot of the window at that moment and a trace of
+  the whole test (every click, and the page before and after it), which `npx playwright show-trace` replays.
+  A test also fails if the window's console logged an error, even when everything on screen looked right.
+
+**What they found while being written:**
+- Two were wrong expectations, not bugs. One assumed a second person's question would be simulated by the
+  server afresh; the server's cache is per circuit version and inputs, not per person, so the answer came
+  from it (rightly). The other looked for an input switch while the Assistant tab was showing, which hides
+  the switches; it now reads the inputs from the truth table's current row.
+- One was a race in the test itself: the drawing is drawn afresh after every change (a simulation result,
+  say), which replaces its elements for a moment, so a pin measured at that instant had no size. The helper
+  that drags wires now measures again until it gets an answer.
+- Stability: every test ran 3 times in a row (105 runs) with no failure, and all 35 passed against the
+  installed files (`release/win-unpacked`).
+
+**They replaced the smoke test** (`scripts/smoke.mjs`), one script of 23 steps where each step needed the
+ones before, so the first failure hid everything after it and nothing could run alone. The new tests cover
+all its steps, and more (the canvas, the palette, deleting gates, sharing seen by the other person, files
+with mistakes, the signal colour).
+
 ## Continuous integration
 
 [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs on every push to `main` and on every pull
@@ -270,8 +329,8 @@ confusing way to find out). The badge at the top of the README shows the last re
 - **Electron isn't downloaded** (`ELECTRON_SKIP_BINARY_DOWNLOAD`): the desktop app's unit tests never start
   it.
 - **A newer commit cancels** the older run on its branch, and the workflow can only read the repository.
-- **Not run there:** the desktop smoke test (it drives the real window: `npm run smoke:desktop`), the load
-  scripts (`scripts/load`), and a real deployment.
+- **Not run there:** the desktop app's end-to-end tests (they drive a real window: `npm run e2e:desktop`,
+  but their `tsc` check is part of `npm test`), the load scripts (`scripts/load`), and a real deployment.
 
 **Checked on Linux before it existed.** The project is developed on Windows, and its tests had only ever
 run there. So the `tests` job was simulated: a Linux container with Node 24, 4 CPUs and access to Docker,
@@ -294,7 +353,7 @@ also keeps shell scripts and the Caddyfile working when they are mounted into Li
   the machine, so a test with a threshold would fail on a slow day. The scripts are in `scripts/load`,
   and the results in [system-design.md](system-design.md).
 - **A browser front end:** there isn't one. The front end is the desktop app, covered by its unit tests and
-  its smoke test.
+  its end-to-end tests.
 - **A Windows run in CI:** the tests run on Linux there, and on Windows by whoever develops. The line-ending
   fix above is what keeps the two alike.
 - **The housekeeping schedule itself:** the tests run housekeeping directly, and check that the

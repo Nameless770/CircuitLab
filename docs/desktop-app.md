@@ -12,7 +12,7 @@ logic circuits, switch their inputs, and watch the signals. It has two modes:
 ```bash
 npm run dev:desktop     # develop: the app with hot reload (start the API too for online mode)
 npm run start:desktop   # build it and run it as users would get it
-npm run smoke:desktop   # click through the real app automatically (screenshots in apps/desktop/dist/smoke/)
+npm run e2e:desktop     # the end-to-end tests: click through the real app automatically
 npm run package:desktop # make the Windows installer: apps/desktop/release/CircuitLab-Setup-0.1.0.exe
 ```
 
@@ -224,9 +224,9 @@ installs for the current user only, so it needs no administrator rights.
     `netlistFileFromArgs` finds it.
   - **Only one CircuitLab at a time** (`requestSingleInstanceLock`). If it's already open, the new
     copy hands the file to the running one and quits, so you don't get a second window.
-- **Testing the result.** `npm run smoke:packaged -w @circuitlab/desktop` runs the same 23-step
-  smoke test against `release/win-unpacked/CircuitLab.exe`, which holds exactly the files the
-  installer installs.
+- **Testing the result.** `npm run e2e:packaged -w @circuitlab/desktop` runs the same end-to-end
+  tests against `release/win-unpacked/CircuitLab.exe`, which holds exactly the files the installer
+  installs.
 
 **It isn't code-signed,** so the first time you run the installer Windows shows "Windows
 protected your PC". Click "More info", then "Run anyway". Signing needs a code-signing
@@ -377,25 +377,12 @@ view, and not at all for circuits over 150 gates.
   are read back). The window has small copies of two things the engine and the netlist package
   do (finding a feedback loop, writing a netlist), because it can't run Node code; tests check
   them against the real ones on the example circuits.
-- **The smoke test** ([smoke.mjs](../apps/desktop/scripts/smoke.mjs)) checks that the screens
-  and pieces fit together:
-  - **Setup.** It starts an API in memory and opens the *built* app with Playwright.
-  - **Steps.** It clicks through both modes in 23 steps, and saves a screenshot of most:
-    - starting with a `.net` file, and a second launch handing one over (saving a drawing over it
-      asks first, because the file's comments will go);
-    - setting the server address in Settings, and switching to the light theme (and that it's saved);
-    - examples: input switches, the 1 to 9 keys, a truth-table row that sets the inputs, a latch;
-    - drawing a circuit, Check, saving with no dialog, exporting a file;
-    - the library: listing, searching, opening, the command palette, deleting;
-    - a mistake in the netlist text, found and shown on its line;
-    - an account, sharing, making a circuit public, a background job, editing a server circuit,
-      uploading, the server's cache;
-    - the assistant, against a fake Ollama: choosing a model in Settings, drafting a circuit (into the
-      library, and into a new circuit for the account), changing the open circuit from the panel
-      beside the drawing (still in Draw mode afterwards, the tab remembered, Undo, and Undo refusing
-      after an edit of your own), Cancel, a refusal, Ollama not running.
-  - **Isolation.** It uses a throwaway profile (`CIRCUITLAB_USER_DATA_DIR`), so it never signs
-    you out or fills your list of recent files.
+- **The end-to-end tests** ([apps/desktop/e2e](../apps/desktop/e2e), `npm run e2e:desktop`) check
+  that the screens and pieces fit together: 35 tests start the *built* app with Playwright Test and
+  click through both modes, the library, files, the assistant (against a fake Ollama) and online mode
+  (against an API in memory). Each test gets a fresh app and a throwaway profile
+  (`CIRCUITLAB_USER_DATA_DIR`), so they never sign you out or fill your list of recent files. What
+  each one covers, and how they're built, is in [testing.md](testing.md#end-to-end-tests-the-desktop-app).
 
 ## Known shortcuts
 

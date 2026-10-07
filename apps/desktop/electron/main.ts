@@ -31,8 +31,8 @@ const RENDERER_DIR = path.join(__dirname, "..", "renderer");
 /** Netlist files bigger than this are refused: a real circuit is far smaller, and reading huge files would freeze the app. */
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-// Where the app keeps its data (sign-in, recent files, settings). The smoke test points this at a
-// throwaway folder, so it never touches your real profile.
+// Where the app keeps its data (sign-in, recent files, settings). The end-to-end tests point this
+// at a throwaway folder, so they never touch your real profile.
 const userDataDir = process.env["CIRCUITLAB_USER_DATA_DIR"];
 if (userDataDir !== undefined) app.setPath("userData", userDataDir);
 
