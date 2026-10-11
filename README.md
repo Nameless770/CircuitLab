@@ -188,7 +188,7 @@ npm run start:api      # phase 4: runs the API on http://localhost:3000/v1
 npm run start:worker   # phase 10: a worker process that computes truth-table jobs (needs REDIS_URL)
 npm run dev:desktop    # the desktop app, with hot reload (run start:api too, for online mode)
 npm run start:desktop  # the desktop app, built as users get it
-npm run e2e:desktop    # end-to-end tests: 35 tests click through the real desktop app (Playwright Test)
+npm run e2e:desktop    # end-to-end tests: 37 tests click through the real desktop app (Playwright Test)
 npm run eval:assistant # how good is the assistant with the model you have? Needs Ollama running (docs/assistant.md)
 npm run package:desktop # the Windows installer: apps/desktop/release/CircuitLab-Setup-0.1.0.exe
 npm run lint:api       # checks openapi.yaml (Redocly, fetched on first use)
@@ -337,10 +337,10 @@ light up), **Draw**, and **Netlist** (the circuit as text). A circuit with a fee
 runs step by step and remembers its state. Truth tables page through any size, and export to CSV.
 Ctrl+K finds any command or circuit, and the window has a dark and a light theme.
 
-**The assistant** (Ctrl+J) sits beside the circuit you're building, in the workspace's right-hand
-column, or slides in over any other screen: describe a circuit or a change to it, and a model running
-in Ollama on your computer drafts it. The app checks the draft, shows its truth table, and puts it in
-the workspace only when you say so. It works with any model you have
+**The assistant** (Ctrl+J) is a chat beside the circuit you're building, in the workspace's
+right-hand column, or over any other screen: describe a circuit, a model running in Ollama on your
+computer drafts it, and you keep asking for changes ("now add an enable input"). The app checks each
+draft, shows its truth table, and puts it in the workspace only when you say so. It works with any model you have
 downloaded (choose it in Settings), and says plainly when Ollama isn't running. With the 3-billion
 parameter model it was built on, about half of the requests come out right, and the numbers, and why the
 model writes formulas instead of gates, are in [docs/assistant.md](docs/assistant.md).

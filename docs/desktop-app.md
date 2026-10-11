@@ -234,7 +234,7 @@ certificate, which costs money and needs a verified identity; see the known shor
 
 ### 11. The assistant
 
-A panel that drafts circuits with a model running in Ollama (Ctrl+J, or the card at the bottom of
+A chat that drafts circuits with a model running in Ollama (Ctrl+J, or the card at the bottom of
 the sidebar). How it works, and how good it is, is in [assistant.md](assistant.md). What belongs
 here is how it sits in the app:
 
@@ -261,17 +261,22 @@ here is how it sits in the app:
     come back to the workspace.
   - **On any other screen it slides in over the screen,** and closes when you use a draft (the
     workspace then shows it, simulated) or press Esc.
-  - **How:** the panel is one element, made once and kept, so what you typed and the last draft
-    survive. While the workspace is on screen it offers its column (`offerAssistantDock`), and the
+  - **How:** the panel is one element, made once and kept, so the chat survives moving around the
+    app. While the workspace is on screen it offers its column (`offerAssistantDock`), and the
     panel moves in there; otherwise it goes in the overlay layer. A panel already open over the
     screen moves into the column when you go to the workspace.
-- **Two things to ask for:**
-  - **"A new circuit":** the answer opens in the workspace, not saved yet. If the open circuit is a
-    new, empty one, the answer goes into it instead, so Save still puts it where that circuit was
-    going (your account, for a "New circuit" started from My circuits).
-  - **"Change the open circuit"** (the choice it starts on beside a circuit): the model is shown
-    the open circuit and answers with the whole changed circuit, which replaces it, unsaved.
-- **Undo** (in the panel beside the circuit, or in the message at the bottom otherwise) brings back
+- **A chat** ([chat.ts](../apps/desktop/src/assistant/chat.ts)): your messages and the drafts, one
+  after the other; older drafts fold away. Each message makes a circuit or changes one, and "Builds
+  on" above the box says which: the **last draft** (while it isn't used yet), the **open circuit**
+  (once the last draft is in it, or when there's no draft), or a **new circuit**. The model is still
+  asked one request and one circuit at a time, as before: the circuit is the chat's memory, so the
+  `@circuitlab/assistant` package didn't change, and neither did its measured accuracy.
+- **Where a draft goes:**
+  - **A new circuit** (and drafts built on it) opens in the workspace, not saved yet. If the open
+    circuit is a new, empty one, the answer goes into it instead, so Save still puts it where that
+    circuit was going (your account, for a "New circuit" started from My circuits).
+  - **A change of the open circuit** (and drafts built on it) replaces that circuit, unsaved.
+- **Undo** (on the draft's card, and in the message at the bottom when the panel was over a screen) brings back
   the circuit as it was before the change. It only works while the circuit is still as the
   assistant left it: after an edit of your own it refuses and says why, instead of throwing your
   edit away too. It compares a fingerprint of the circuit (gates, wires, pins, name, description,
@@ -378,7 +383,7 @@ view, and not at all for circuits over 150 gates.
   do (finding a feedback loop, writing a netlist), because it can't run Node code; tests check
   them against the real ones on the example circuits.
 - **The end-to-end tests** ([apps/desktop/e2e](../apps/desktop/e2e), `npm run e2e:desktop`) check
-  that the screens and pieces fit together: 35 tests start the *built* app with Playwright Test and
+  that the screens and pieces fit together: 37 tests start the *built* app with Playwright Test and
   click through both modes, the library, files, the assistant (against a fake Ollama) and online mode
   (against an API in memory). Each test gets a fresh app and a throwaway profile
   (`CIRCUITLAB_USER_DATA_DIR`), so they never sign you out or fill your list of recent files. What

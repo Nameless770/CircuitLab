@@ -33,7 +33,7 @@ export class CircuitLab {
   ) {
     this.assistant = page.locator(".assistant");
     this.request = page.getByLabel("What circuit do you want?");
-    this.askButton = this.assistant.getByRole("button", { name: "Ask", exact: true });
+    this.askButton = this.assistant.getByRole("button", { name: "Send", exact: true });
     this.netlistText = page.locator("textarea.net-text");
     this.cards = page.locator(".card-grid .ccard");
   }
@@ -167,9 +167,20 @@ export class CircuitLab {
     return this.page.locator(".inspector .assistant.docked");
   }
 
+  /** Sends a message in the chat. */
   async ask(text: string): Promise<void> {
     await this.request.fill(text);
     await this.askButton.click();
+  }
+
+  /** The newest draft in the chat: a card with its picture, table and buttons. */
+  get lastDraft(): Locator {
+    return this.assistant.locator(".as-answer").last();
+  }
+
+  /** What the next message builds on: "Last draft", "Open circuit" or "New circuit". */
+  basis(label: "Last draft" | "Open circuit" | "New circuit"): Locator {
+    return this.assistant.locator('[aria-label="Builds on"]').getByRole("button", { name: label, exact: true });
   }
 
   /** The panel's own close button (only when it is over the screen). */

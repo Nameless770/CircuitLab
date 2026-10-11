@@ -18,7 +18,7 @@ container (`redis:8-alpine`), and the test with several processes also starts a 
 | `npm run test:coverage` | The same, with a coverage report (`coverage/index.html`); fails below the thresholds |
 | `npm run test:watch` | Re-runs tests as files change; run `npx tsc -b -w` alongside so the build stays current |
 | `npx vitest run --project engine` | One package: `engine`, `netlist`, `assistant`, `runner`, `api-contract`, `api`, or `desktop` |
-| `npm run e2e:desktop` | The end-to-end tests: 35 tests click through the real desktop app (see [End-to-end tests](#end-to-end-tests-the-desktop-app)); not part of `npm test` |
+| `npm run e2e:desktop` | The end-to-end tests: 37 tests click through the real desktop app (see [End-to-end tests](#end-to-end-tests-the-desktop-app)); not part of `npm test` |
 | `npm run e2e:report -w @circuitlab/desktop` | Opens the last end-to-end run's HTML report (screens and traces of failures) |
 
 The desktop app's unit tests test its source directly (Vite transforms them), not a build: its
@@ -274,7 +274,7 @@ start the real program, click and type in its window, and look at what it shows.
 | draw.spec.ts | 3 | Drawing a circuit from the palette, wiring it with the mouse, Check, saving it; deleting a gate and its wires; "unsaved" only after a change; exporting a file |
 | netlist.spec.ts | 2 | A mistake listed and marked on its line, then the fixed text applied; leaving Netlist mode with mistakes |
 | library.spec.ts | 3 | Saving, listing newest first, filtering, searching, opening, deleting (and the files on disk); the home screen's list; Close and the command palette |
-| assistant.spec.ts | 8 | Against a fake Ollama: a draft and what was sent to the model; the panel beside the drawing; Undo, and Undo refusing after an edit; the remembered tab; Esc; an empty circuit taking the draft; Cancel, a refusal, an empty request; Ollama not running |
+| assistant.spec.ts | 10 | Against a fake Ollama: a draft and what was sent to the model; the chat (a follow-up built on the last draft, the conversation kept, Discard, New chat); the panel beside the drawing; Undo, and Undo refusing after an edit; the remembered tab; Esc; an empty circuit taking the draft; Cancel and Ask again, a refusal, an empty request; Ollama not running |
 | settings.spec.ts | 3 | The server address (checked, saved, used), Ollama's address and model, the theme and signal colour |
 | online.spec.ts | 8 | Against an API in memory: an account; server simulation and its cache; sharing, seen from the other account; making a circuit public; a background job; a new version; copying to and from the library; a new circuit for the account drafted by the assistant |
 
@@ -305,7 +305,8 @@ start the real program, click and type in its window, and look at what it shows.
   say), which replaces its elements for a moment, so a pin measured at that instant had no size. The helper
   that drags wires now measures again until it gets an answer.
 - Stability: every test ran 3 times in a row (105 runs) with no failure, and all 35 passed against the
-  installed files (`release/win-unpacked`).
+  installed files (`release/win-unpacked`). The two chat tests added later, with the rest of the
+  assistant's and online mode's, ran 3 times too (54 runs), with no failure.
 
 **They replaced the smoke test** (`scripts/smoke.mjs`), one script of 23 steps where each step needed the
 ones before, so the first failure hid everything after it and nothing could run alone. The new tests cover

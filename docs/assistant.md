@@ -1,7 +1,8 @@
 # The assistant
 
-A panel in the desktop app (Ctrl+J). You describe a circuit in words ("a 2-to-1 multiplexer
-with inputs D0, D1 and SEL"), and a language model drafts it. The model runs in
+A chat in the desktop app (Ctrl+J). You describe a circuit in words ("a 2-to-1 multiplexer
+with inputs D0, D1 and SEL"), a language model drafts it, and you can keep asking for changes ("now
+add an enable input"). The model runs in
 [Ollama](https://ollama.com) **on your own computer**: nothing you write goes to a cloud service or to
 CircuitLab's server.
 
@@ -10,7 +11,7 @@ anything in your circuit by itself: it checks the draft, shows how it behaves (i
 waits for you to press "Use this in the editor".
 
 <p align="center">
-  <img src="images/assistant.png" alt="The workspace in Draw mode with the assistant in the right-hand column: a request to change the open circuit, and the draft the model made, with a drawing, its truth table, and the button that puts it in the circuit" width="720">
+  <img src="images/assistant.png" alt="The workspace in Draw mode with the assistant's chat in the right-hand column: a request to change the open circuit, and the draft the model made, with a drawing, its truth table, and the button that puts it in the circuit" width="720">
 </p>
 
 ```bash
@@ -28,24 +29,40 @@ workspace.
 
 ## What it does
 
-1. You write a request, and choose *a new circuit* or *change the open circuit*.
+1. You write a message (Enter sends, Shift+Enter starts a new line). Above the box, **Builds on** says
+   what it changes: the **last draft**, the **open circuit**, or nothing (a **new circuit**).
 2. The app asks the model, checks the answer, and (if the answer has mistakes it can find) asks again,
    up to three times. This takes about a second with a GPU.
-3. You see a **draft**: the model's one-sentence idea, the gates and inputs and outputs, a drawing, the
-   whole truth table (up to 4 inputs), and the netlist.
+3. A **draft** appears in the chat, under your message: the model's one-sentence idea, the gates and
+   inputs and outputs, a drawing, the whole truth table (up to 4 inputs), and the netlist. Older drafts
+   fold away, and stay in the chat.
 4. **Use this in the editor** opens it in the workspace, not saved yet; **Use this in the open circuit**
    replaces the open circuit with it (with **Undo**, as long as you haven't changed the circuit since).
    Beside the circuit, the panel stays open and you stay in the mode you were in. Then check it and save
-   as usual. **Discard** throws it away.
+   as usual. **Discard** sets a draft aside, so the next message doesn't build on it.
+5. Keep going: "now add an enable input", "use only NAND gates". **New chat** starts over.
+
+**What a follow-up builds on**, unless you choose otherwise:
+- the **last draft**, while you haven't used it yet (so you can refine it before it touches your circuit);
+- the **open circuit**, once the last draft is in it, or when there's no draft (so your own edits count
+  too);
+- nothing (a **new circuit**) when nothing is open.
+
+**The model doesn't see the whole chat**, only the circuit it should change and your latest message,
+exactly as with a single question. The circuit is the chat's memory. That keeps a small model's job
+small (it would soon lose track of a long conversation, and its accuracy above was measured on single
+questions); the price is that a message like "the same, but as I said before" means nothing to it.
 
 If Ollama isn't running, the panel says so and how to fix it; if the model can't do it, it says that
-too, with the model's own words.
+too, with the model's own words. A failed or stopped message has **Ask again**, which puts it back in
+the box. The chat lasts while the app is open.
 
 ## How it fits together
 
 ```
 ┌── the window ──────────────────────────┐
-│ src/assistant/drawer.ts                │   asks, shows the draft, puts it in the workspace
+│ src/assistant/chat.ts                  │   the chat: asks, shows drafts, puts them in the workspace
+│ src/assistant/drawer.ts                │   where the panel is: beside the circuit, or over a screen
 │ src/assistant/settings-card.ts         │   Ollama's address, the model
 └────────────┬───────────────────────────┘
              │ window.circuitlab.askAssistant(...)   (the bridge: electron/bridge.ts)
@@ -214,9 +231,11 @@ for one run (the end-to-end tests use settings.json instead, like a person's sav
     error, not Ollama, too slow, cancelled) has its own message.
 - **The end-to-end tests** ([assistant.spec.ts](../apps/desktop/e2e/assistant.spec.ts), and parts of
   settings.spec.ts and online.spec.ts) drive the real app against a fake Ollama (the same HTTP API,
-  canned answers): what is sent to the model, drafting a circuit offline and online, using it, the panel
-  beside the drawing, changing a circuit and undoing (and Undo refusing after an edit), Cancel, a
-  refusal, an empty request, Ollama not running, and the settings being kept.
+  canned answers): what is sent to the model, drafting a circuit offline and online, using it, a
+  follow-up built on the last draft (the model is shown that draft), the chat keeping every message,
+  Discard and New chat, the panel beside the drawing, changing a circuit and undoing (and Undo refusing
+  after an edit), Cancel and Ask again, a refusal, an empty request, Ollama not running, and the
+  settings being kept.
 - **The evaluation** (`npm run eval:assistant`) is the only thing that needs a real model, so it is
   not in CI.
 
@@ -224,7 +243,8 @@ for one run (the end-to-end tests use settings.json instead, like a person's sav
 
 | Shortcut | Why it's acceptable for now | The proper fix |
 | --- | --- | --- |
-| One question at a time, with no conversation: "now make it 3 bits" starts over | The draft and the editor are the memory; changing a circuit is its own mode | Keep the last few requests and answers |
+| The model sees the circuit and your latest message, not the whole chat: "as I said before" means nothing to it | The circuit carries what matters ("now make it 3 bits" works), a small model would lose track of a long chat, and its accuracy was measured on single questions | Also send the last few messages, then measure again |
+| The chat is gone when the app closes, and there is one chat, not one per circuit | Drafts that matter end up in a circuit, which is saved | Keep chats with their circuits |
 | The answer arrives whole, with no streaming | An answer takes about a second with a GPU, and every one is checked as a whole anyway | Stream while it's drafted, check at the end |
 | The 3B model is right about half the time, and weaker on new things | It's the model there is; the truth table is shown for that reason | Try a bigger model (see above), and add recipes |
 | Only "only NAND" and "only NOR" are understood as limits on the gates | The two classic exercises | Read "only AND, OR and NOT", "at most N gates", ... |

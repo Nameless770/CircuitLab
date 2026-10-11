@@ -1,27 +1,33 @@
 import type { CircuitLab } from "./circuitlab";
 import { expect, test } from "./fixtures";
 
-// The assistant, against the fake Ollama of fixtures.ts (canned answers, picked by the question).
+// The assistant's chat, against the fake Ollama of fixtures.ts (canned answers, picked by the question).
 
 /** A full adder drafted by the assistant and saved in the library: a circuit with known formulas. */
 async function savedFullAdderFromTheAssistant(ui: CircuitLab): Promise<void> {
   await ui.openAssistant();
   await ui.ask("a full adder");
-  await ui.assistant.getByRole("button", { name: "Use this in the editor" }).click();
+  await ui.lastDraft.getByRole("button", { name: "Use this in the editor" }).click();
   await ui.expectOpen("Full adder");
   await ui.save("Save to library");
   await ui.expectBadge("In your library");
+}
+
+/** What the fake Ollama was last asked. */
+function lastQuestion(chats: { messages: readonly { content: string }[] }[]): string {
+  return chats.at(-1)?.messages.at(-1)?.content ?? "";
 }
 
 test("drafts a circuit, shows how it behaves, and opens it when asked", async ({ ui, ollama }) => {
   await ui.openAssistant(); // on the home screen it comes over the screen
   await expect(ui.dockedAssistant).toHaveCount(0);
   await expect(ui.assistant).toContainText("Using other-model:3b in Ollama, on this computer");
+  await expect(ui.basis("New circuit"), "nothing is open to build on").toHaveAttribute("aria-pressed", "true");
   await ui.ask("a full adder");
-  await expect(ui.assistant).toContainText("SUM is the parity of the inputs");
-  await expect(ui.assistant).toContainText("Made by other-model:3b.");
-  await expect(ui.assistant.locator(".as-answer table.tt tbody tr"), "the whole truth table of 3 inputs").toHaveCount(8);
-  await expect(ui.assistant.locator(".as-answer .netlist-text")).toContainText("xor1 = XOR(A, B, CIN)");
+  await expect(ui.lastDraft).toContainText("SUM is the parity of the inputs");
+  await expect(ui.lastDraft).toContainText("Made by other-model:3b.");
+  await expect(ui.lastDraft.locator("table.tt tbody tr"), "the whole truth table of 3 inputs").toHaveCount(8);
+  await expect(ui.lastDraft.locator(".netlist-text")).toContainText("xor1 = XOR(A, B, CIN)");
   await ui.shot("assistant-draft");
 
   // What reached Ollama: the chosen model, the answer's shape, the recipes for this request, the request.
@@ -34,12 +40,55 @@ test("drafts a circuit, shows how it behaves, and opens it when asked", async ({
   expect(asked?.messages.at(-1)?.content).toBe("Design this circuit: a full adder");
 
   // Nothing is in the workspace until "Use this".
-  await ui.assistant.getByRole("button", { name: "Use this in the editor" }).click();
+  await ui.lastDraft.getByRole("button", { name: "Use this in the editor" }).click();
   await expect(ui.toast("The workspace now holds the assistant's circuit")).toBeVisible();
   await expect(ui.assistant, "over a screen, it closes").toHaveCount(0);
   await ui.expectOpen("Full adder");
   await ui.expectBadge("Not saved");
   await ui.expectOutput("COUT", "0");
+});
+
+test("a follow-up builds on the last draft, and the chat keeps the whole conversation", async ({ ui, ollama }) => {
+  await ui.openAssistant();
+  await ui.ask("a full adder");
+  await expect(ui.lastDraft).toContainText("SUM is the parity of the inputs");
+  await expect(ui.basis("Last draft")).toHaveAttribute("aria-pressed", "true");
+  await expect(ui.request, "the box is emptied for the next message").toHaveValue("");
+
+  await ui.request.fill("invert the carry output");
+  await ui.request.press("Enter"); // Enter sends, as in any chat
+  await expect(ui.lastDraft).toContainText("The same circuit, with the carry turned upside down.");
+  // The model was shown the draft, in its own format, to change it.
+  const question = lastQuestion(ollama.chats);
+  expect(question).toMatch(/^Here is the current circuit:\n\{/);
+  expect(question, "the draft's formulas").toContain('"formula":"A ^ B ^ CIN"');
+
+  await expect(ui.assistant.locator(".chat-you")).toHaveCount(2);
+  await expect(ui.assistant.locator(".chat-you").last()).toContainText("To change the draft “Full adder”");
+  await expect(ui.assistant.locator(".as-answer")).toHaveCount(2);
+  await expect(ui.assistant.locator(".as-answer details.as-more").first(), "older drafts fold away").toHaveJSProperty("open", false);
+  await ui.shot("assistant-chat");
+
+  // Built on a new circuit, it opens as a new circuit.
+  await ui.lastDraft.getByRole("button", { name: "Use this in the editor" }).click();
+  await ui.expectOpen("Inverted-carry adder");
+  await ui.expectBadge("Not saved");
+});
+
+test("Discard sets a draft aside, and New chat starts over", async ({ ui, ollama }) => {
+  await ui.openAssistant();
+  await ui.ask("a full adder");
+  await ui.lastDraft.getByRole("button", { name: "Discard" }).click();
+  await expect(ui.lastDraft).toContainText("Set aside");
+  await expect(ui.basis("Last draft")).toBeDisabled();
+  await expect(ui.basis("New circuit")).toHaveAttribute("aria-pressed", "true");
+  await ui.ask("a full adder");
+  expect(lastQuestion(ollama.chats), "a new circuit again, not a change").toBe("Design this circuit: a full adder");
+
+  await ui.assistant.getByRole("button", { name: "New chat" }).click();
+  await expect(ui.assistant.locator(".chat-you")).toHaveCount(0);
+  await expect(ui.assistant.locator(".as-answer")).toHaveCount(0);
+  await expect(ui.assistant.getByText("Try:")).toBeVisible();
 });
 
 test("beside the drawing: changes the open circuit, and you keep drawing", async ({ ui, ollama }) => {
@@ -50,20 +99,21 @@ test("beside the drawing: changes the open circuit, and you keep drawing", async
   await expect(ui.dockedAssistant).toBeVisible();
   await expect(ui.page.locator('.ins-tabs button[aria-pressed="true"]')).toHaveText("Assistant");
   await expect(ui.page.locator(".canvas.drawing"), "the drawing stays in view").toBeVisible();
-  await expect(ui.assistant.getByRole("button", { name: "Change the open circuit" })).toHaveAttribute("aria-pressed", "true");
+  await expect(ui.basis("Open circuit")).toHaveAttribute("aria-pressed", "true");
 
   await ui.ask("invert the carry output");
-  await expect(ui.assistant).toContainText("The same circuit, with the carry turned upside down.");
+  await expect(ui.lastDraft).toContainText("The same circuit, with the carry turned upside down.");
   // The model was shown the circuit as it is, in its own format.
-  const question = ollama.chats.at(-1)?.messages.at(-1)?.content ?? "";
+  const question = lastQuestion(ollama.chats);
   expect(question).toMatch(/^Here is the current circuit:\n\{/);
   expect(question, "the open circuit's formulas").toContain('"formula":"A ^ B ^ CIN"');
   expect(question.endsWith("Change it like this: invert the carry output\nAnswer with the complete new circuit.")).toBe(true);
   await ui.shot("assistant-docked");
 
-  await ui.assistant.getByRole("button", { name: "Use this in the open circuit" }).click();
+  await ui.lastDraft.getByRole("button", { name: "Use this in the open circuit" }).click();
   await expect(ui.page.locator('.canvas.drawing [data-type="NOT"]'), "still drawing, now with the change").toHaveCount(1);
   await expect(ui.dockedAssistant, "the panel stays for the next question").toBeVisible();
+  await expect(ui.basis("Open circuit"), "the next message changes the circuit, with any edits of your own").toHaveAttribute("aria-pressed", "true");
   await ui.expectBadge("In your library"); // still where it's saved, with unsaved changes
   await expect(ui.page.locator(".tb-dirty")).toHaveCount(1);
   await ui.save("Save to library");
@@ -75,23 +125,24 @@ test("Undo brings the circuit back, but not after an edit of your own", async ({
   await ui.setMode("Draw");
   await ui.more("Ask the assistant to change it");
   await ui.ask("invert the carry output");
-  const use = ui.assistant.getByRole("button", { name: "Use this in the open circuit" });
+  const use = ui.lastDraft.getByRole("button", { name: "Use this in the open circuit" });
   const undo = ui.assistant.getByRole("button", { name: "Undo", exact: true });
   const nots = ui.page.locator('.canvas [data-type="NOT"]');
   await use.click();
   await expect(nots).toHaveCount(1);
-  await expect(ui.assistant.locator(".alert.ok")).toContainText("The assistant's change is in the open circuit");
+  await expect(ui.lastDraft.locator(".alert.ok")).toContainText("The assistant's change is in the open circuit");
   await undo.click();
   await expect(nots).toHaveCount(0);
   await expect(ui.page.locator(".tb-dirty"), "back as it was saved").toHaveCount(0);
+  await expect(ui.lastDraft).toContainText("Undone.");
 
   // Again, then an edit of your own: Undo would throw that away too, so it refuses and keeps both.
-  await ui.askButton.click();
+  await ui.ask("invert the carry output");
   await use.click();
   await expect(nots).toHaveCount(1);
   await ui.addGate("BUF");
   await undo.click();
-  await expect(ui.assistant).toContainText("Not undone: the circuit has changed since");
+  await expect(ui.lastDraft).toContainText("Not undone: the circuit has changed since");
   await expect(nots).toHaveCount(1);
   await expect(ui.page.locator('.canvas [data-type="BUF"]')).toHaveCount(1);
 });
@@ -131,9 +182,10 @@ test("an empty new circuit takes the draft, and you stay in Draw mode", async ({
   await ui.expectOpen("Untitled circuit");
   await ui.openAssistant();
   await expect(ui.dockedAssistant).toBeVisible();
-  await expect(ui.assistant.getByRole("button", { name: "Change the open circuit" }), "an empty circuit has nothing to change").toBeDisabled();
+  await expect(ui.basis("Open circuit"), "an empty circuit has nothing to change").toBeDisabled();
+  await expect(ui.basis("New circuit")).toHaveAttribute("aria-pressed", "true");
   await ui.ask("a full adder");
-  await ui.assistant.getByRole("button", { name: "Use this in the editor" }).click();
+  await ui.lastDraft.getByRole("button", { name: "Use this in the editor" }).click();
   await ui.expectOpen("Full adder");
   await expect(ui.gate("xor1")).toBeVisible();
   await expect(ui.page.locator(".canvas.drawing")).toBeVisible();
@@ -150,6 +202,8 @@ test("Cancel stops a slow answer; a request that isn't a circuit is declined; an
   await expect(ui.assistant).toContainText("Stopped.");
   await expect(cancel).toBeHidden();
   await expect(ui.askButton).toBeEnabled();
+  await ui.assistant.getByRole("button", { name: "Ask again" }).click();
+  await expect(ui.request, "the request is back in the box").toHaveValue("a slow circuit");
 
   await ui.ask("pancakes");
   await expect(ui.assistant).toContainText("The assistant can't make that.");

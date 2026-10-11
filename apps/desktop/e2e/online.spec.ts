@@ -138,7 +138,7 @@ test("a new circuit started from My circuits, drafted by the assistant, is saved
   await ui.openAssistant();
   await expect(ui.dockedAssistant).toBeVisible();
   await ui.ask("a full adder");
-  await ui.assistant.getByRole("button", { name: "Use this in the editor" }).click();
+  await ui.lastDraft.getByRole("button", { name: "Use this in the editor" }).click();
   await ui.expectOpen("Full adder");
   await ui.save("Save");
   await expect(ui.toast("Saved “Full adder” in your account.")).toBeVisible();
